@@ -32,14 +32,13 @@ public class LxApiHelper {
         }
     }
 
-    // 平台定义
     public static final String[] PLATFORM_NAMES = new String[]{"聚合搜索", "QQ音乐", "网易云", "酷狗音乐", "酷我音乐", "咪咕音乐"};
     public static final String[] PLATFORM_CODES = new String[]{"all", "tx", "wy", "kg", "kw", "mg"};
 
     public static final String[] PLAZA_PLATFORM_NAMES = new String[]{"QQ音乐", "网易云", "酷狗音乐", "酷我音乐", "咪咕音乐"};
     public static final String[] PLAZA_PLATFORM_CODES = new String[]{"tx", "wy", "kg", "kw", "mg"};
 
-    // 1. 各大平台热搜词获取
+    // 1. 各平台热门搜索词
     public static ArrayList<String> fetchHotSearch(String platform) {
         ArrayList<String> list = new ArrayList<String>();
         try {
@@ -73,7 +72,8 @@ public class LxApiHelper {
                     }
                 }
             } else {
-                String res = httpGet("https://c.y.qq.com/splcloud/fcgi-bin/gethotkey.fcg?g_tk=5381&format=json");
+                // QQ音乐接口增加强制 UTF-8 声明，彻底杜绝乱码
+                String res = httpGet("https://c.y.qq.com/splcloud/fcgi-bin/gethotkey.fcg?g_tk=5381&format=json&inCharset=utf8&outCharset=utf-8&utf8=1");
                 if (res != null) {
                     JSONObject root = new JSONObject(res);
                     JSONArray arr = root.getJSONObject("data").getJSONArray("hotkey");
@@ -90,7 +90,7 @@ public class LxApiHelper {
         return list;
     }
 
-    // 2. 歌单广场分类定义 (与各平台官网完全一致)
+    // 2. 歌单广场分类定义
     public static Map<String, String[]> getPresetCategories(String platformCode) {
         Map<String, String[]> cat = new LinkedHashMap<String, String[]>();
         if ("wy".equals(platformCode)) {
@@ -126,13 +126,13 @@ public class LxApiHelper {
         return cat;
     }
 
-    // 3. 歌单广场歌单列表获取
+    // 3. 歌单广场获取（带UTF-8编码及分类支持）
     public static ArrayList<PlaylistInfo> fetchPlaylists(String platform, String tag, int page) {
         ArrayList<PlaylistInfo> list = new ArrayList<PlaylistInfo>();
         try {
             if ("tx".equalsIgnoreCase(platform)) {
                 String catParam = (tag == null || tag.length() == 0 || "全部".equals(tag)) ? "10000000" : URLEncoder.encode(tag, "UTF-8");
-                String url = "https://c.y.qq.com/splcloud/fcgi-bin/fcg_get_diss_by_tag.fcg?sin=" + ((page - 1) * 30) + "&ein=" + (page * 30 - 1) + "&categoryId=10000000&sortId=5&format=json";
+                String url = "https://c.y.qq.com/splcloud/fcgi-bin/fcg_get_diss_by_tag.fcg?sin=" + ((page - 1) * 30) + "&ein=" + (page * 30 - 1) + "&categoryId=10000000&sortId=5&format=json&inCharset=utf8&outCharset=utf-8&utf8=1";
                 String res = httpGet(url);
                 if (res != null) {
                     JSONObject root = new JSONObject(res);
@@ -197,7 +197,7 @@ public class LxApiHelper {
         try {
             String encoded = URLEncoder.encode(keyword, "UTF-8");
             if ("tx".equalsIgnoreCase(platform)) {
-                String url = "https://c.y.qq.com/soso/fcgi-bin/client_music_search_songlist?page_no=" + (page - 1) + "&num_per_page=30&format=json&query=" + encoded;
+                String url = "https://c.y.qq.com/soso/fcgi-bin/client_music_search_songlist?page_no=" + (page - 1) + "&num_per_page=30&format=json&inCharset=utf8&outCharset=utf-8&utf8=1&query=" + encoded;
                 String res = httpGet(url);
                 if (res != null) {
                     JSONObject root = new JSONObject(res);
@@ -236,7 +236,6 @@ public class LxApiHelper {
                     }
                 }
             } else {
-                // 网易云
                 String url = "https://music.163.com/api/search/get?s=" + encoded + "&type=1000&limit=30&offset=" + ((page - 1) * 30);
                 String res = httpGet(url);
                 if (res != null) {
@@ -254,7 +253,7 @@ public class LxApiHelper {
         return list;
     }
 
-    // 5. 歌单内歌曲获取
+    // 5. 歌单内歌曲获取（规范生成下划线格式 ID，确保可播）
     public static ArrayList<MainActivity.DisplayEntry> fetchPlaylistSongs(String rawPlaylistId) {
         ArrayList<MainActivity.DisplayEntry> songs = new ArrayList<MainActivity.DisplayEntry>();
         try {
@@ -267,7 +266,7 @@ public class LxApiHelper {
                     JSONArray tracks = root.getJSONObject("playlist").getJSONArray("tracks");
                     for (int i = 0; i < tracks.length(); i++) {
                         JSONObject t = tracks.getJSONObject(i);
-                        String songId = "wy:" + t.getLong("id");
+                        String songId = "wy_" + t.getLong("id");
                         String title = t.getString("name");
                         String artist = "群星";
                         if (t.has("ar") && t.getJSONArray("ar").length() > 0) {
@@ -295,13 +294,13 @@ public class LxApiHelper {
                             title = p[1].trim();
                         }
                         String hash = o.optString("hash", "");
-                        String songId = "kg:" + hash;
+                        String songId = "kg_" + hash;
                         songs.add(new MainActivity.DisplayEntry(songId, title, artist, artist + " [320K MP3]", null, "320K MP3", true, 320));
                     }
                 }
             } else if (rawPlaylistId.startsWith("tx_")) {
                 String id = rawPlaylistId.substring(3);
-                String url = "https://c.y.qq.com/qzone/fcg-bin/fcg_ucc_getcdinfo_byids_cp.fcg?type=1&json=1&utf8=1&onlysong=0&disstid=" + id + "&format=json";
+                String url = "https://c.y.qq.com/qzone/fcg-bin/fcg_ucc_getcdinfo_byids_cp.fcg?type=1&json=1&utf8=1&onlysong=0&disstid=" + id + "&format=json&inCharset=utf8&outCharset=utf-8&utf8=1";
                 String res = httpGet(url);
                 if (res != null) {
                     JSONObject root = new JSONObject(res);
@@ -314,7 +313,7 @@ public class LxApiHelper {
                         if (s.has("singer") && s.getJSONArray("singer").length() > 0) {
                             artist = s.getJSONArray("singer").getJSONObject(0).getString("name");
                         }
-                        songs.add(new MainActivity.DisplayEntry("tx:" + songmid, title, artist, artist + " [320K MP3]", null, "320K MP3", true, 320));
+                        songs.add(new MainActivity.DisplayEntry("tx_" + songmid, title, artist, artist + " [320K MP3]", null, "320K MP3", true, 320));
                     }
                 }
             }
@@ -322,7 +321,7 @@ public class LxApiHelper {
         return songs;
     }
 
-    // 6. 各大平台核心排行榜列表定义 (完全匹配截图)
+    // 6. 各大平台排行榜定义
     public static String[][] getPresetLeaderboards(String platformCode) {
         if ("wy".equals(platformCode)) {
             return new String[][]{
@@ -360,14 +359,14 @@ public class LxApiHelper {
         }
     }
 
-    // 7. 排行榜歌曲列表获取
+    // 7. 排行榜歌曲数据抓取（下划线格式 ID，支持可播）
     public static ArrayList<MainActivity.DisplayEntry> fetchLeaderboardSongs(String platform, String boardKey) {
         ArrayList<MainActivity.DisplayEntry> songs = new ArrayList<MainActivity.DisplayEntry>();
         try {
             if ("wy".equalsIgnoreCase(platform)) {
                 return fetchPlaylistSongs("wy_" + boardKey);
             } else if ("tx".equalsIgnoreCase(platform)) {
-                String url = "https://c.y.qq.com/v8/fcg-bin/fcg_v8_toplist_cp.fcg?topid=" + boardKey + "&type=top&format=json";
+                String url = "https://c.y.qq.com/v8/fcg-bin/fcg_v8_toplist_cp.fcg?topid=" + boardKey + "&type=top&format=json&inCharset=utf8&outCharset=utf-8&utf8=1";
                 String res = httpGet(url);
                 if (res != null) {
                     JSONObject root = new JSONObject(res);
@@ -380,7 +379,7 @@ public class LxApiHelper {
                         if (data.has("singer") && data.getJSONArray("singer").length() > 0) {
                             artist = data.getJSONArray("singer").getJSONObject(0).getString("name");
                         }
-                        songs.add(new MainActivity.DisplayEntry("tx:" + mid, title, artist, artist + " [320K MP3]", null, "320K MP3", true, 320));
+                        songs.add(new MainActivity.DisplayEntry("tx_" + mid, title, artist, artist + " [320K MP3]", null, "320K MP3", true, 320));
                     }
                 }
             } else if ("kg".equalsIgnoreCase(platform)) {
@@ -400,7 +399,7 @@ public class LxApiHelper {
                             title = p[1].trim();
                         }
                         String hash = o.optString("hash", "");
-                        songs.add(new MainActivity.DisplayEntry("kg:" + hash, title, artist, artist + " [320K MP3]", null, "320K MP3", true, 320));
+                        songs.add(new MainActivity.DisplayEntry("kg_" + hash, title, artist, artist + " [320K MP3]", null, "320K MP3", true, 320));
                     }
                 }
             } else if ("kw".equalsIgnoreCase(platform)) {
@@ -414,7 +413,7 @@ public class LxApiHelper {
                         String id = o.getString("id");
                         String title = o.getString("name");
                         String artist = o.optString("artist", "酷我歌手");
-                        songs.add(new MainActivity.DisplayEntry("kw:" + id, title, artist, artist + " [320K MP3]", null, "320K MP3", true, 320));
+                        songs.add(new MainActivity.DisplayEntry("kw_" + id, title, artist, artist + " [320K MP3]", null, "320K MP3", true, 320));
                     }
                 }
             }
@@ -422,7 +421,7 @@ public class LxApiHelper {
         return songs;
     }
 
-    // 8. 通用 GET 请求 (设置 PC 浏览器 UA 与 TLS 1.2 支持)
+    // 8. 通用 GET 请求（动态检测 Content-Type 编码，彻底防止中文乱码）
     public static String httpGet(String urlStr) {
         HttpURLConnection conn = null;
         try {
@@ -430,15 +429,22 @@ public class LxApiHelper {
             URL url = new URL(urlStr);
             conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("GET");
-            conn.setConnectTimeout(6000);
-            conn.setReadTimeout(8000);
+            conn.setConnectTimeout(7000);
+            conn.setReadTimeout(9000);
             conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36");
             conn.setRequestProperty("Referer", "https://y.qq.com/");
             if (conn instanceof HttpsURLConnection) {
                 ((HttpsURLConnection) conn).setSSLSocketFactory(new TLSSocketFactory());
             }
             if (conn.getResponseCode() == 200) {
-                BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream(), "UTF-8"));
+                String charset = "UTF-8";
+                String contentType = conn.getContentType();
+                if (contentType != null) {
+                    String lower = contentType.toLowerCase();
+                    if (lower.contains("charset=gbk")) charset = "GBK";
+                    else if (lower.contains("charset=gb2312")) charset = "GB2312";
+                }
+                BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream(), charset));
                 StringBuilder sb = new StringBuilder();
                 String line;
                 while ((line = reader.readLine()) != null) sb.append(line);
