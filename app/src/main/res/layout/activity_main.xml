@@ -267,11 +267,13 @@
                                 android:layout_height="26dp"
                                 android:layout_toLeftOf="@+id/cb_dedup_songs"
                                 android:layout_centerVertical="true"
+                                android:layout_marginRight="8dp"
                                 android:background="@drawable/bg_btn_default"
                                 android:text="返回搜索"
-                                android:textColor="#00e5ff"
+                                android:textColor="#e0e0e0"
                                 android:textSize="11sp"
-                                android:layout_marginRight="8dp"
+                                android:paddingLeft="8dp"
+                                android:paddingRight="8dp"
                                 android:visibility="gone" />
                             <CheckBox
                                 android:id="@+id/cb_dedup_songs"
