@@ -64,7 +64,7 @@ public class MainActivity extends Activity {
     // 搜索页
     private Spinner spinnerSearchPlatform, spinnerSearchType;
     private EditText etSearchKeyword;
-    private Button btnSearchSubmit, btnSearchBack;
+    private Button btnSearchSubmit, btnSearchBack, btnToggleHotSearch;
     private LinearLayout layoutHotSearchBox, layoutHotSearchTags, layoutSearchResultBox;
     private TextView tvHotSearchTitle, tvSearchResultTitle;
     private CheckBox cbDedupSongs;
@@ -376,6 +376,18 @@ public class MainActivity extends Activity {
         etSearchKeyword = (EditText) findViewById(R.id.et_search_keyword);
         btnSearchSubmit = (Button) findViewById(R.id.btn_search_submit);
         btnSearchBack = (Button) findViewById(R.id.btn_search_back);
+        
+        // 绑定热门搜索收起/展开按钮
+        btnToggleHotSearch = (Button) findViewById(R.id.btn_toggle_hot_search);
+        if (btnToggleHotSearch != null) {
+            btnToggleHotSearch.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    toggleHotSearchBox();
+                }
+            });
+        }
+
         layoutHotSearchBox = (LinearLayout) findViewById(R.id.layout_hot_search_box);
         layoutHotSearchTags = (LinearLayout) findViewById(R.id.layout_hot_search_tags);
         tvHotSearchTitle = (TextView) findViewById(R.id.tv_hot_search_title);
@@ -513,6 +525,24 @@ public class MainActivity extends Activity {
         detailQueueAdapter = new SimpleAdapter(this, queueData, android.R.layout.simple_list_item_2,
                 new String[]{"title", "subtitle"}, new int[]{android.R.id.text1, android.R.id.text2});
         lvDetailQueue.setAdapter(detailQueueAdapter);
+    }
+
+    private void toggleHotSearchBox() {
+        isHotSearchCollapsed = !isHotSearchCollapsed;
+        View parentScroll = findViewById(R.id.scroll_hot_search);
+        if (parentScroll == null && layoutHotSearchTags != null) {
+            parentScroll = (View) layoutHotSearchTags.getParent();
+        }
+        if (parentScroll != null) {
+            parentScroll.setVisibility(isHotSearchCollapsed ? View.GONE : View.VISIBLE);
+        }
+        if (btnToggleHotSearch != null) {
+            btnToggleHotSearch.setText(isHotSearchCollapsed ? "展开" : "收起");
+        }
+        if (tvHotSearchTitle != null) {
+            tvHotSearchTitle.setText(isHotSearchCollapsed ? "🔥 平台热门搜索 [展开 ▾]" : "🔥 平台热门搜索 [收起 ▴]");
+        }
+        Toast.makeText(MainActivity.this, isHotSearchCollapsed ? "已收起热门搜索" : "已展开热门搜索", Toast.LENGTH_SHORT).show();
     }
 
     private void setupNavigation() {
@@ -1395,13 +1425,7 @@ public class MainActivity extends Activity {
         tvHotSearchTitle.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                isHotSearchCollapsed = !isHotSearchCollapsed;
-                View parentScroll = (View) layoutHotSearchTags.getParent();
-                if (parentScroll != null) {
-                    parentScroll.setVisibility(isHotSearchCollapsed ? View.GONE : View.VISIBLE);
-                }
-                tvHotSearchTitle.setText(isHotSearchCollapsed ? "🔥 平台热门搜索 [展开 ▾]" : "🔥 平台热门搜索 [收起 ▴]");
-                Toast.makeText(MainActivity.this, isHotSearchCollapsed ? "已收起热门搜索" : "已展开热门搜索", Toast.LENGTH_SHORT).show();
+                toggleHotSearchBox();
             }
         });
 
@@ -1430,11 +1454,18 @@ public class MainActivity extends Activity {
                 }
             }
         });
+
+        // 2. 增强搜索列表长按事件（歌手、专辑、歌曲全部支持长按弹出菜单）
         lvSearchResults.setOnItemLongClickListener(new AdapterView.OnItemLongClickListener() {
             @Override
             public boolean onItemLongClick(AdapterView<?> parent, View view, int position, long id) {
                 if (position >= 0 && position < searchResultsList.size()) {
-                    showSongLongClickMenu(searchResultsList.get(position), position);
+                    DisplayEntry entry = searchResultsList.get(position);
+                    if (entry.isSong) {
+                        showSongLongClickMenu(entry, position);
+                    } else {
+                        showArtistOrAlbumLongClickMenu(entry);
+                    }
                     return true;
                 }
                 return false;
@@ -1567,6 +1598,31 @@ public class MainActivity extends Activity {
         });
 
         setupPlaybackControls();
+    }
+
+    private void showArtistOrAlbumLongClickMenu(final DisplayEntry entry) {
+        ArrayList<String> optList = new ArrayList<String>();
+        optList.add("▶ 展开查看内含歌曲");
+        optList.add("▶ 播放全部歌曲");
+        optList.add("＋ 添加全部到播放队列");
+        final String[] options = optList.toArray(new String[0]);
+
+        new AlertDialog.Builder(this)
+                .setTitle((entry.id.startsWith("artist_") ? "歌手: " : "专辑: ") + entry.title)
+                .setItems(options, new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        if (which == 0) {
+                            if (entry.id.startsWith("album_")) fetchAlbumSongs(entry.id.substring(6), entry.title);
+                            else if (entry.id.startsWith("artist_")) fetchArtistAlbums(entry.id.substring(7), entry.title);
+                        } else if (which == 1) {
+                            playAllFromPlaylist(entry);
+                        } else if (which == 2) {
+                            addAllToQueueFromPlaylist(entry);
+                        }
+                    }
+                })
+                .show();
     }
 
     private void restoreSearchBackup() {
@@ -2351,14 +2407,25 @@ public class MainActivity extends Activity {
         Toast.makeText(this, "已添加到播放队列末尾: " + entry.title, Toast.LENGTH_SHORT).show();
     }
 
+    // 3. 歌单广场长按菜单：增加“收藏歌单到我的歌单”，隐藏“重命名/删除”
     private void showPlaylistLongClickMenu(final DisplayEntry playlistEntry) {
+        boolean isPlatformPlazaPlaylist = playlistEntry.id.startsWith("tx_") || playlistEntry.id.startsWith("wy_")
+                || playlistEntry.id.startsWith("kg_") || playlistEntry.id.startsWith("kw_") || playlistEntry.id.startsWith("mg_");
+        boolean isLocalFixedPlaylist = "fav_entry".equals(playlistEntry.id) || "local_featured".equals(playlistEntry.id)
+                || "local_car".equals(playlistEntry.id);
+
         ArrayList<String> optList = new ArrayList<String>();
         optList.add("▶ 播放全部歌曲");
         optList.add("＋ 添加全部到播放队列");
-        if (!"fav_entry".equals(playlistEntry.id) && !"local_featured".equals(playlistEntry.id) && !"local_car".equals(playlistEntry.id)) {
+
+        if (isPlatformPlazaPlaylist) {
+            optList.add("⭐ 收藏歌单 (添加到我的收藏)");
+        } else if (!isLocalFixedPlaylist) {
+            // 仅在“我的收藏”里自己创建的歌单才允许重命名和删除
             optList.add("✏ 重命名歌单");
             optList.add("🗑 删除歌单");
         }
+
         final String[] options = optList.toArray(new String[0]);
         new AlertDialog.Builder(this)
                 .setTitle("歌单操作: " + playlistEntry.title)
@@ -2370,6 +2437,8 @@ public class MainActivity extends Activity {
                             playAllFromPlaylist(playlistEntry);
                         } else if (opt.contains("添加全部到播放队列")) {
                             addAllToQueueFromPlaylist(playlistEntry);
+                        } else if (opt.contains("收藏歌单")) {
+                            bookmarkPlazaPlaylist(playlistEntry);
                         } else if (opt.contains("重命名歌单")) {
                             promptRenamePlaylist(playlistEntry);
                         } else if (opt.contains("删除歌单")) {
@@ -2380,8 +2449,30 @@ public class MainActivity extends Activity {
                 .show();
     }
 
+    // 收藏平台歌单到“我的收藏”
+    private void bookmarkPlazaPlaylist(final DisplayEntry playlistEntry) {
+        Toast.makeText(this, "正在收藏歌单...", Toast.LENGTH_SHORT).show();
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    // 在服务器上以该歌单名称创建属于用户的自建歌单
+                    String param = "name=" + URLEncoder.encode("【收藏】" + playlistEntry.title, "UTF-8");
+                    requestApi("createPlaylist.view?" + param + "&" + getAuthParams());
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            Toast.makeText(MainActivity.this, "已成功收藏到「我的收藏」！", Toast.LENGTH_SHORT).show();
+                            fetchServerPlaylistsQuietly();
+                        }
+                    });
+                } catch (Exception ignored) {}
+            }
+        }).start();
+    }
+
     private void playAllFromPlaylist(final DisplayEntry pl) {
-        Toast.makeText(this, "正在载入歌单全部歌曲...", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "正在载入全部歌曲...", Toast.LENGTH_SHORT).show();
         new Thread(new Runnable() {
             @Override
             public void run() {
@@ -2400,9 +2491,9 @@ public class MainActivity extends Activity {
                     public void run() {
                         if (songs != null && !songs.isEmpty()) {
                             playSongInList(songs, songs.get(0));
-                            Toast.makeText(MainActivity.this, "开始播放歌单: " + pl.title, Toast.LENGTH_SHORT).show();
+                            Toast.makeText(MainActivity.this, "开始播放: " + pl.title, Toast.LENGTH_SHORT).show();
                         } else {
-                            Toast.makeText(MainActivity.this, "未能获取到歌单歌曲", Toast.LENGTH_SHORT).show();
+                            Toast.makeText(MainActivity.this, "未能获取到歌曲列表", Toast.LENGTH_SHORT).show();
                         }
                     }
                 });
@@ -2411,7 +2502,7 @@ public class MainActivity extends Activity {
     }
 
     private void addAllToQueueFromPlaylist(final DisplayEntry pl) {
-        Toast.makeText(this, "正在将歌单歌曲加入队列...", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "正在将歌曲加入队列...", Toast.LENGTH_SHORT).show();
         new Thread(new Runnable() {
             @Override
             public void run() {
@@ -2454,17 +2545,24 @@ public class MainActivity extends Activity {
         ArrayList<DisplayEntry> resList = new ArrayList<DisplayEntry>();
         ArrayList<Map<String, String>> dummy = new ArrayList<Map<String, String>>();
         try {
-            String res = requestApi("getPlaylist.view?id=" + URLEncoder.encode(plId, "UTF-8") + "&" + getAuthParams());
+            boolean isAlbum = plId.startsWith("album_");
+            String actualId = isAlbum ? plId.substring(6) : plId;
+            String endpoint = isAlbum ? ("getAlbum.view?id=" + URLEncoder.encode(actualId, "UTF-8"))
+                    : ("getPlaylist.view?id=" + URLEncoder.encode(actualId, "UTF-8"));
+            String res = requestApi(endpoint + "&" + getAuthParams());
             if (res != null) {
                 JSONObject root = new JSONObject(res).getJSONObject("subsonic-response");
-                JSONObject pl = root.optJSONObject("playlist");
-                if (pl != null && pl.has("entry")) {
-                    Object obj = pl.get("entry");
-                    if (obj instanceof JSONArray) {
-                        JSONArray arr = (JSONArray) obj;
-                        for (int i = 0; i < arr.length(); i++) addSongRow(arr.getJSONObject(i), resList, dummy);
-                    } else if (obj instanceof JSONObject) {
-                        addSongRow((JSONObject) obj, resList, dummy);
+                JSONObject pl = isAlbum ? root.optJSONObject("album") : root.optJSONObject("playlist");
+                if (pl != null) {
+                    String songKey = isAlbum ? "song" : "entry";
+                    if (pl.has(songKey)) {
+                        Object obj = pl.get(songKey);
+                        if (obj instanceof JSONArray) {
+                            JSONArray arr = (JSONArray) obj;
+                            for (int i = 0; i < arr.length(); i++) addSongRow(arr.getJSONObject(i), resList, dummy);
+                        } else if (obj instanceof JSONObject) {
+                            addSongRow((JSONObject) obj, resList, dummy);
+                        }
                     }
                 }
             }
@@ -3052,13 +3150,16 @@ public class MainActivity extends Activity {
         data.add(row);
     }
 
+    // 4. 解析歌曲条目时增强健壮性（兼容各平台 name 与 title 字段）
     private void addSongRow(JSONObject s, ArrayList<DisplayEntry> list, ArrayList<Map<String, String>> data) throws Exception {
-        String title = s.getString("title");
-        String artist = s.optString("artist", "未知歌手");
-        String cover = s.optString("coverArt", null);
+        String title = s.optString("title", s.optString("name", "未知歌曲"));
+        String artist = s.optString("artist", s.optString("singer", "未知歌手"));
+        String cover = s.optString("coverArt", s.optString("picUrl", null));
         int bitRate = s.optInt("bitRate", 0);
         String quality = bitRate > 320 ? "FLAC 无损" : (bitRate > 0 ? bitRate + "K" : "标准");
-        list.add(new DisplayEntry(s.getString("id"), title, artist, artist + " [" + quality + "]", cover, quality, true, bitRate, null));
+        String songId = s.optString("id", s.optString("songmid", ""));
+
+        list.add(new DisplayEntry(songId, title, artist, artist + " [" + quality + "]", cover, quality, true, bitRate, null));
         Map<String, String> row = new HashMap<String, String>();
         row.put("title", title);
         row.put("subtitle", artist + " [" + quality + "]");
