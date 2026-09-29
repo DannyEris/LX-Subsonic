@@ -602,6 +602,21 @@ public class MusicService extends Service {
 
         recreateMediaPlayer();
 
+        // 检查是否为本地文件路径
+        if (song.streamUrl != null && (song.streamUrl.startsWith("/") || song.streamUrl.startsWith("file://"))) {
+            String localPath = song.streamUrl.replace("file://", "");
+            File localFile = new File(localPath);
+            if (localFile.exists()) {
+                if (startPlayFile(localFile)) {
+                isBuffering = false;
+                bufferPercent = 100;
+                broadcastStatus();
+                savePlaybackState(this, mediaPlayer, true);
+                return;
+                }
+            }
+        }
+        
         // 1. 本地缓存直接秒开
         if (CacheManager.isSongCached(this, song.id)) {
             File cached = CacheManager.getSongFile(this, song.id);
