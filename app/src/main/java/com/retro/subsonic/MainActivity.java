@@ -64,7 +64,7 @@ public class MainActivity extends Activity {
     // 搜索页
     private Spinner spinnerSearchPlatform, spinnerSearchType;
     private EditText etSearchKeyword;
-    private Button btnSearchSubmit;
+    private Button btnSearchSubmit, btnSearchBack;
     private LinearLayout layoutHotSearchBox, layoutHotSearchTags, layoutSearchResultBox;
     private TextView tvHotSearchTitle, tvSearchResultTitle;
     private CheckBox cbDedupSongs;
@@ -375,6 +375,7 @@ public class MainActivity extends Activity {
         spinnerSearchType = (Spinner) findViewById(R.id.spinner_search_type);
         etSearchKeyword = (EditText) findViewById(R.id.et_search_keyword);
         btnSearchSubmit = (Button) findViewById(R.id.btn_search_submit);
+        btnSearchBack = (Button) findViewById(R.id.btn_search_back);
         layoutHotSearchBox = (LinearLayout) findViewById(R.id.layout_hot_search_box);
         layoutHotSearchTags = (LinearLayout) findViewById(R.id.layout_hot_search_tags);
         tvHotSearchTitle = (TextView) findViewById(R.id.tv_hot_search_title);
@@ -609,6 +610,7 @@ public class MainActivity extends Activity {
     private void performSearch(final String keyword) {
         if (keyword == null || keyword.trim().length() == 0) return;
         isBrowsingArtistOrAlbum = false;
+        if (btnSearchBack != null) btnSearchBack.setVisibility(View.GONE);
         int pPos = spinnerSearchPlatform.getSelectedItemPosition();
         final String source = LxApiHelper.PLATFORM_CODES[pPos >= 0 ? pPos : 0];
         final int typePos = spinnerSearchType.getSelectedItemPosition();
@@ -753,6 +755,7 @@ public class MainActivity extends Activity {
                                     addAlbumRow((JSONObject) albObj, searchResultsList, searchResultsData);
                                 }
                                 tvSearchResultTitle.setText("⬅ [返回搜索] " + artistName + " 的专辑");
+                                if (btnSearchBack != null) btnSearchBack.setVisibility(View.VISIBLE);
                                 searchResultsAdapter.notifyDataSetChanged();
                             }
                         } catch (Exception ignored) {}
@@ -788,6 +791,7 @@ public class MainActivity extends Activity {
                                     addSongRow((JSONObject) songObj, searchResultsList, searchResultsData);
                                 }
                                 tvSearchResultTitle.setText("⬅ [返回] 专辑: " + albumName);
+                                if (btnSearchBack != null) btnSearchBack.setVisibility(View.VISIBLE);
                                 searchResultsAdapter.notifyDataSetChanged();
                             }
                         } catch (Exception ignored) {}
@@ -1315,7 +1319,14 @@ public class MainActivity extends Activity {
                 if (item.id.equals(entry.id)) {
                     clickedSongIndex = queue.size();
                 }
-                String playUrl = (item.localPath != null) ? ("file://" + item.localPath) : buildStreamUrl(item.id, getSavedBitrate());
+                String playUrl;
+                if (item.localPath != null && item.localPath.length() > 0) {
+                    playUrl = "file://" + item.localPath;
+                } else if (item.id != null && item.id.startsWith("local_file:")) {
+                    playUrl = "file://" + item.id.substring(11);
+                } else {
+                    playUrl = buildStreamUrl(item.id, getSavedBitrate());
+                }
                 queue.add(new MusicService.SongItem(item.id, item.title, item.artist, playUrl, item.coverArt, item.quality));
             }
         }
@@ -1369,6 +1380,16 @@ public class MainActivity extends Activity {
                 performSearch(etSearchKeyword.getText().toString().trim());
             }
         });
+
+        btnSearchBack = (Button) findViewById(R.id.btn_search_back);
+        if (btnSearchBack != null) {
+            btnSearchBack.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    restoreSearchBackup();
+                }
+            });
+        }
 
         // 热门搜索折叠/展开
         tvHotSearchTitle.setOnClickListener(new View.OnClickListener() {
@@ -1555,6 +1576,7 @@ public class MainActivity extends Activity {
         searchResultsData.clear();
         searchResultsData.addAll(backupSearchData);
         tvSearchResultTitle.setText(backupSearchTitle);
+        if (btnSearchBack != null) btnSearchBack.setVisibility(View.GONE);
         searchResultsAdapter.notifyDataSetChanged();
     }
 
@@ -2289,7 +2311,14 @@ public class MainActivity extends Activity {
     private void insertNextToPlay(DisplayEntry entry) {
         ArrayList<MusicService.SongItem> queue = MusicService.getPlaylist();
         int curIdx = MusicService.getCurrentIndex();
-        String playUrl = (entry.localPath != null) ? ("file://" + entry.localPath) : buildStreamUrl(entry.id, getSavedBitrate());
+        String playUrl;
+        if (entry.localPath != null && entry.localPath.length() > 0) {
+            playUrl = "file://" + entry.localPath;
+        } else if (entry.id != null && entry.id.startsWith("local_file:")) {
+            playUrl = "file://" + entry.id.substring(11);
+        } else {
+            playUrl = buildStreamUrl(entry.id, getSavedBitrate());
+        }
         MusicService.SongItem item = new MusicService.SongItem(entry.id, entry.title, entry.artist, playUrl, entry.coverArt, entry.quality);
         if (queue.isEmpty() || curIdx < 0) {
             queue.add(item);
@@ -2303,7 +2332,14 @@ public class MainActivity extends Activity {
 
     private void addToPlayQueue(DisplayEntry entry) {
         ArrayList<MusicService.SongItem> queue = MusicService.getPlaylist();
-        String playUrl = (entry.localPath != null) ? ("file://" + entry.localPath) : buildStreamUrl(entry.id, getSavedBitrate());
+        String playUrl;
+        if (entry.localPath != null && entry.localPath.length() > 0) {
+            playUrl = "file://" + entry.localPath;
+        } else if (entry.id != null && entry.id.startsWith("local_file:")) {
+            playUrl = "file://" + entry.id.substring(11);
+        } else {
+            playUrl = buildStreamUrl(entry.id, getSavedBitrate());
+        }
         MusicService.SongItem item = new MusicService.SongItem(entry.id, entry.title, entry.artist, playUrl, entry.coverArt, entry.quality);
         if (queue.isEmpty()) {
             queue.add(item);
@@ -2395,7 +2431,14 @@ public class MainActivity extends Activity {
                         if (songs != null && !songs.isEmpty()) {
                             ArrayList<MusicService.SongItem> q = MusicService.getPlaylist();
                             for (DisplayEntry s : songs) {
-                                String pUrl = (s.localPath != null) ? ("file://" + s.localPath) : buildStreamUrl(s.id, getSavedBitrate());
+                                String pUrl;
+                                if (s.localPath != null && s.localPath.length() > 0) {
+                                    pUrl = "file://" + s.localPath;
+                                } else if (s.id != null && s.id.startsWith("local_file:")) {
+                                    pUrl = "file://" + s.id.substring(11);
+                                } else {
+                                    pUrl = buildStreamUrl(s.id, getSavedBitrate());
+                                }
                                 q.add(new MusicService.SongItem(s.id, s.title, s.artist, pUrl, s.coverArt, s.quality));
                             }
                             refreshQueueList();
@@ -2616,7 +2659,14 @@ public class MainActivity extends Activity {
                     }
                 }
                 try {
-                    String initialUrl = (entry.localPath != null) ? ("file://" + entry.localPath) : buildStreamUrl(entry.id);
+                    String initialUrl;
+                    if (entry.localPath != null && entry.localPath.length() > 0) {
+                        initialUrl = "file://" + entry.localPath;
+                    } else if (entry.id != null && entry.id.startsWith("local_file:")) {
+                        initialUrl = "file://" + entry.id.substring(11);
+                    } else {
+                        initialUrl = buildStreamUrl(entry.id);
+                    }
                     boolean ok = downloadWithRedirects(initialUrl, targetFile, 0);
                     if (ok && CacheManager.isValidAudioFile(targetFile)) {
                         runOnUiThread(new Runnable() {
