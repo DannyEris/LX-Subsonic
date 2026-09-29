@@ -116,9 +116,9 @@ public class MusicService extends Service {
         playlist.addAll(list);
         currentIndex = index;
         pendingSeekPosition = 0;
-
         Intent intent = new Intent(context, MusicService.class);
         intent.setAction(ACTION_PLAY_INDEX);
+        intent.putExtra("target_index", index); // 传入目标播放序号，修复点击歌曲不起播问题
         context.startService(intent);
     }
 
