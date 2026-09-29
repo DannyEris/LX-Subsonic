@@ -36,6 +36,7 @@ public class CacheManager {
     }
 
     private static String sanitizeFileName(String id) {
+        if (id == null || id.length() == 0) return "unknown";
         return id.replaceAll("[^a-zA-Z0-9_-]", "_");
     }
 
