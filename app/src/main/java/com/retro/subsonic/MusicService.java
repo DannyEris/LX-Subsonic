@@ -602,18 +602,15 @@ public class MusicService extends Service {
 
         recreateMediaPlayer();
 
-        // 检查是否为本地文件路径
-        if (song.streamUrl != null && (song.streamUrl.startsWith("/") || song.streamUrl.startsWith("file://"))) {
-            String localPath = song.streamUrl.replace("file://", "");
-            File localFile = new File(localPath);
-            if (localFile.exists()) {
-                if (startPlayFile(localFile)) {
+        // 修改 playCurrent 方法开头对本地路径的判断逻辑：
+        if (song.streamUrl != null && song.streamUrl.startsWith("file://")) {
+            File localFile = new File(song.streamUrl.substring(7));
+            if (localFile.exists() && startPlayFile(localFile)) {
                 isBuffering = false;
                 bufferPercent = 100;
                 broadcastStatus();
                 savePlaybackState(this, mediaPlayer, true);
                 return;
-                }
             }
         }
         
