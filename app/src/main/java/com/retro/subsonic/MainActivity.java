@@ -173,10 +173,17 @@ public class MainActivity extends Activity {
         public int bitRateNumeric;
         public String localPath;
 
+        // 7 参数构造器
         public DisplayEntry(String id, String title, String artist, String subtitle, String coverArt, String quality, boolean isSong) {
             this(id, title, artist, subtitle, coverArt, quality, isSong, 0, null);
         }
 
+        // 8 参数构造器（兼容 LxApiHelper.java 调用）
+        public DisplayEntry(String id, String title, String artist, String subtitle, String coverArt, String quality, boolean isSong, int bitRateNumeric) {
+            this(id, title, artist, subtitle, coverArt, quality, isSong, bitRateNumeric, null);
+        }
+
+        // 9 参数构造器（支持本地文件路径）
         public DisplayEntry(String id, String title, String artist, String subtitle, String coverArt, String quality, boolean isSong, int bitRateNumeric, String localPath) {
             this.id = id;
             this.title = title;
