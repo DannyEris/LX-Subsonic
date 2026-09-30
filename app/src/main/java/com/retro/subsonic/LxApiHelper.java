@@ -66,7 +66,6 @@ public class LxApiHelper {
     private static final Map<String, Map<String, ArrayList<CategoryTag>>> CATEGORY_CACHE = new HashMap<String, Map<String, ArrayList<CategoryTag>>>();
     private static final Map<String, ArrayList<LeaderboardInfo>> LEADERBOARD_CACHE = new HashMap<String, ArrayList<LeaderboardInfo>>();
 
-    // 核心优化：各大音乐平台 CDN 级别缩略图自动压缩，体积缩减 90%，从源头杜绝老旧硬件卡顿
     public static String formatCoverThumbnail(String url) {
         if (url == null || url.length() == 0) return "";
         try {
@@ -77,7 +76,6 @@ public class LxApiHelper {
             } else if (url.contains("kugou.com")) {
                 return url.replace("{size}", "200");
             } else if (url.contains("gtimg.cn") || url.contains("qq.com")) {
-                // QQ音乐封面缩略适配
                 if (url.contains("300x300")) return url.replace("300x300", "150x150");
             }
         } catch (Throwable ignored) {}
@@ -163,6 +161,7 @@ public class LxApiHelper {
         }
     }
 
+    // 100% 官方实时动态拉取分类树，移除所有硬编码静态兜底字典
     public static Map<String, ArrayList<CategoryTag>> fetchDynamicCategories(String platform) {
         String key = platform.toLowerCase();
         if (CATEGORY_CACHE.containsKey(key)) {
@@ -273,41 +272,13 @@ public class LxApiHelper {
             }
         } catch (Throwable ignored) {}
 
-        if (result.isEmpty()) {
-            Map<String, String[]> preset = getFallbackCategories(platform);
-            for (Map.Entry<String, String[]> entry : preset.entrySet()) {
-                ArrayList<CategoryTag> tags = new ArrayList<CategoryTag>();
-                for (String t : entry.getValue()) tags.add(new CategoryTag(t, t));
-                result.put(entry.getKey(), tags);
-            }
-        } else {
+        if (!result.isEmpty()) {
             CATEGORY_CACHE.put(key, result);
         }
-
         return result;
     }
 
-    private static Map<String, String[]> getFallbackCategories(String platformCode) {
-        Map<String, String[]> cat = new LinkedHashMap<String, String[]>();
-        if ("wy".equals(platformCode)) {
-            cat.put("语种", new String[]{"华语", "欧美", "日语", "韩语", "粤语"});
-            cat.put("风格", new String[]{"流行", "摇滚", "民谣", "电子", "舞曲", "说唱", "轻音乐", "爵士", "古风", "ACG"});
-            cat.put("场景", new String[]{"清晨", "夜晚", "学习", "工作", "驾车", "运动", "旅行"});
-            cat.put("情感", new String[]{"怀旧", "清新", "浪漫", "伤感", "治愈", "放松", "快乐"});
-            cat.put("主题", new String[]{"影视原声", "ACG", "经典", "翻唱", "KTV", "网络歌曲"});
-        } else if ("tx".equals(platformCode)) {
-            cat.put("热门", new String[]{"官方歌单", "免费热歌"});
-            cat.put("语种", new String[]{"国语", "粤语", "英语", "韩语", "日语", "闽南语"});
-            cat.put("流派", new String[]{"流行", "电子", "轻音乐", "民谣", "说唱", "摇滚", "古风"});
-            cat.put("场景", new String[]{"夜店", "学习工作", "咖啡馆", "运动", "睡前", "旅行"});
-            cat.put("心情", new String[]{"伤感", "快乐", "安静", "治愈", "甜蜜"});
-        } else {
-            cat.put("精选", new String[]{"流行", "热歌", "经典", "网络", "车载", "古风", "民谣", "轻音乐"});
-            cat.put("语种", new String[]{"华语", "欧美", "粤语", "日韩"});
-        }
-        return cat;
-    }
-
+    // 100% 官方实时动态拉取排行榜列表，移除所有硬编码伪造数据
     public static ArrayList<LeaderboardInfo> fetchDynamicLeaderboards(String platform) {
         String key = platform.toLowerCase();
         if (LEADERBOARD_CACHE.containsKey(key)) {
@@ -368,28 +339,31 @@ public class LxApiHelper {
                     }
                 }
             } else if ("mg".equalsIgnoreCase(platform)) {
-                list.add(new LeaderboardInfo("27553319", "咪咕热歌榜", ""));
-                list.add(new LeaderboardInfo("27186466", "咪咕新歌榜", ""));
-                list.add(new LeaderboardInfo("27553258", "咪咕飙升榜", ""));
-                list.add(new LeaderboardInfo("27553408", "影视金曲榜", ""));
-                list.add(new LeaderboardInfo("27553380", "网络热歌榜", ""));
-                list.add(new LeaderboardInfo("27553423", "欧美热歌榜", ""));
-                list.add(new LeaderboardInfo("27553435", "日韩音乐榜", ""));
-                list.add(new LeaderboardInfo("27553450", "国风新韵榜", ""));
-                list.add(new LeaderboardInfo("27553462", "说唱音乐榜", ""));
-                list.add(new LeaderboardInfo("27553474", "DJ嗨歌榜", ""));
-                list.add(new LeaderboardInfo("27553486", "KTV点唱榜", ""));
+                // 接入咪咕官方全量排行榜动态接口
+                String res = httpGet("https://app.c.nf.migu.cn/MIGUM2.0/v1.0/content/queryRankList.do");
+                if (res != null) {
+                    JSONObject root = new JSONObject(res);
+                    if (root.has("columnInfo") && root.getJSONObject("columnInfo").has("contents")) {
+                        JSONArray arr = root.getJSONObject("columnInfo").getJSONArray("contents");
+                        for (int i = 0; i < arr.length(); i++) {
+                            JSONObject o = arr.getJSONObject(i).optJSONObject("objectInfo");
+                            if (o != null) {
+                                String id = o.optString("columnId", o.optString("contentId", ""));
+                                String name = o.optString("columnTitle", o.optString("contentName", ""));
+                                String pic = formatCoverThumbnail(o.optString("image", ""));
+                                if (id.length() > 0 && name.length() > 0) {
+                                    list.add(new LeaderboardInfo(id, name, pic));
+                                }
+                            }
+                        }
+                    }
+                }
             }
         } catch (Throwable ignored) {}
 
         if (!list.isEmpty()) {
             LEADERBOARD_CACHE.put(key, list);
-        } else {
-            list.add(new LeaderboardInfo("hot", "热歌榜", ""));
-            list.add(new LeaderboardInfo("new", "新歌榜", ""));
-            list.add(new LeaderboardInfo("soar", "飙升榜", ""));
         }
-
         return list;
     }
 
@@ -593,7 +567,6 @@ public class LxApiHelper {
         try {
             if (rawPlaylistId.startsWith("wy_")) {
                 String id = rawPlaylistId.substring(3);
-
                 String res = httpGet("https://music.163.com/api/v6/playlist/detail?id=" + id + "&n=1000");
                 if (res == null || !res.contains("\"tracks\"")) {
                     res = httpGet("https://music.163.com/api/playlist/detail?id=" + id + "&n=1000");
