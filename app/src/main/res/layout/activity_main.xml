@@ -192,7 +192,7 @@
                             android:layout_marginLeft="6dp" />
                     </LinearLayout>
 
-                    <!-- 热门搜索推荐区域 (带展开/收起功能) -->
+                    <!-- 热门搜索推荐区域 -->
                     <LinearLayout
                         android:id="@+id/layout_hot_search_box"
                         android:layout_width="match_parent"
@@ -295,7 +295,7 @@
                     </LinearLayout>
                 </LinearLayout>
 
-                <!-- 2. 歌单广场页 -->
+                <!-- 2. 歌单广场页 (重新设计：支持多平台同步切换、分类弹窗、搜歌单、刷新重载、分页加载) -->
                 <LinearLayout
                     android:id="@+id/layout_page_plaza"
                     android:layout_width="match_parent"
@@ -323,6 +323,17 @@
                             android:background="@drawable/bg_btn_default"
                             android:text="选择分类 ▾"
                             android:textColor="#00e5ff"
+                            android:textSize="12sp"
+                            android:paddingLeft="10dp"
+                            android:paddingRight="10dp"
+                            android:layout_marginLeft="6dp" />
+                        <Button
+                            android:id="@+id/btn_plaza_refresh"
+                            android:layout_width="wrap_content"
+                            android:layout_height="34dp"
+                            android:background="@drawable/bg_btn_default"
+                            android:text="🔄 刷新"
+                            android:textColor="#e0e0e0"
                             android:textSize="12sp"
                             android:paddingLeft="10dp"
                             android:paddingRight="10dp"
@@ -378,7 +389,7 @@
                                 android:layout_height="wrap_content"
                                 android:layout_alignParentLeft="true"
                                 android:layout_centerVertical="true"
-                                android:text="全部分类歌单"
+                                android:text="全部分类歌单 (第 1 页)"
                                 android:textColor="#a0a5b5"
                                 android:textSize="13sp" />
                             <Button
@@ -432,13 +443,24 @@
                             android:spinnerMode="dropdown" />
                         <TextView
                             android:id="@+id/tv_ranking_board_title"
-                            android:layout_width="wrap_content"
+                            android:layout_width="0dp"
                             android:layout_height="wrap_content"
+                            android:layout_weight="1"
                             android:text="飙升榜"
                             android:textColor="#00e5ff"
                             android:textSize="14sp"
                             android:textStyle="bold"
                             android:layout_marginLeft="14dp" />
+                        <Button
+                            android:id="@+id/btn_ranking_refresh"
+                            android:layout_width="wrap_content"
+                            android:layout_height="32dp"
+                            android:background="@drawable/bg_btn_default"
+                            android:text="🔄 刷新榜单"
+                            android:textColor="#e0e0e0"
+                            android:textSize="12sp"
+                            android:paddingLeft="10dp"
+                            android:paddingRight="10dp" />
                     </LinearLayout>
 
                     <LinearLayout
