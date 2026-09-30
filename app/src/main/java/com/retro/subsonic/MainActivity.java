@@ -2,7 +2,6 @@ package com.retro.subsonic;
 
 import android.app.Activity;
 import android.app.AlertDialog;
-import android.app.Dialog;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.DialogInterface;
@@ -12,24 +11,23 @@ import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
-import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffXfermode;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.Typeface;
-import android.graphics.drawable.ColorDrawable;
 import android.media.MediaMetadataRetriever;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
+import android.util.LruCache;
 import android.view.Gravity;
 import android.view.KeyEvent;
+import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.Window;
 import android.view.WindowManager;
 import android.view.animation.Animation;
 import android.view.animation.LinearInterpolator;
@@ -82,25 +80,26 @@ public class MainActivity extends Activity {
     private boolean isHotSearchCollapsed = false;
 
     // 歌单广场
-    private Spinner spinnerPlazaPlatform, spinnerPlazaSort;
+    private Spinner spinnerPlazaPlatform;
     private Button btnPlazaCategory, btnPlazaViewMode, btnPlazaRefresh, btnPlazaImport, btnPlazaSearchSubmit, btnPlazaBack;
     private EditText etPlazaSearch;
     private TextView tvPlazaCurrentTag;
-    private ListView lvPlazaPlaylists;
+    private LinearLayout layoutPlazaSortContainer;
     private GridView gvPlazaPlaylists;
+    private ListView lvPlazaPlaylists;
     private ArrayList<DisplayEntry> plazaPlaylistsList = new ArrayList<DisplayEntry>();
     private ArrayList<Map<String, String>> plazaPlaylistsData = new ArrayList<Map<String, String>>();
     private SimpleAdapter plazaPlaylistsAdapter;
     private PlazaGridAdapter plazaGridAdapter;
     private String currentPlazaTag = "";
-    private String currentPlazaSort = "5";
+    private String currentPlazaSort = "最热";
     private int currentPlazaPage = 1;
     private boolean isLoadingPlaza = false;
     private boolean hasMorePlaza = true;
     private boolean isPlazaSearchMode = false;
     private String currentPlazaSearchKeyword = "";
-    private boolean isPlazaGridView = true; // 默认网格封面视图
-    private Map<String, Bitmap> coverThumbnailCache = new HashMap<String, Bitmap>();
+    private boolean isPlazaGridMode = true;
+    private TextView footerPlazaLoading;
 
     // 排行榜
     private Spinner spinnerRankingPlatform;
@@ -139,7 +138,7 @@ public class MainActivity extends Activity {
     private Button btnClearCache, btnSaveSettings;
     private TextView tvCacheUsed;
 
-    // 播放条与详情
+    // 底部控制条与全屏详情 Overlay
     private ImageView btnExitApp, btnDetailExitApp;
     private ImageView ivBottomCover, btnMode, btnDetailMode, btnPrev, btnDetailPrev, btnPlayPause, btnDetailPlayPause, btnNext, btnDetailNext, btnOpenEq, btnDetailEq;
     private TextView tvCurrentSong, tvTime, tvDetailTitle, tvDetailArtist, tvDetailQuality, tvDetailBuffer, tvDetailTime, tvLyricOffsetStatus;
@@ -180,6 +179,9 @@ public class MainActivity extends Activity {
     private RotateAnimation vinylRotateAnim;
     private Bitmap currentRawCoverBitmap, currentCircularCoverBitmap, currentBottomCoverBitmap;
     private Handler lyricHandler = new Handler();
+
+    // 内存图片缓存 (防 OOM 机制)
+    private static LruCache<String, Bitmap> imageMemoryCache;
 
     private Handler dlnaSyncHandler = new Handler();
     private Runnable dlnaSyncRunnable = new Runnable() {
@@ -323,7 +325,18 @@ public class MainActivity extends Activity {
         prefs = getSharedPreferences("subsonic_cfg", MODE_PRIVATE);
         lyricBaseFontSize = prefs.getInt("lyric_font_size", 15);
         isVinylDisplayMode = prefs.getBoolean("is_vinyl_display_mode", true);
-        isPlazaGridView = prefs.getBoolean("is_plaza_grid_view", true);
+        isPlazaGridMode = prefs.getBoolean("is_plaza_grid_mode", true);
+
+        // 初始化 8MB 内存图片缓存
+        if (imageMemoryCache == null) {
+            int maxMemory = (int) (Runtime.getRuntime().maxMemory() / 1024);
+            int cacheSize = Math.max(1024 * 4, maxMemory / 8);
+            imageMemoryCache = new LruCache<String, Bitmap>(cacheSize) {
+                @Override protected int sizeOf(String key, Bitmap bitmap) {
+                    return bitmap.getByteCount() / 1024;
+                }
+            };
+        }
 
         loadFavSet();
         loadLocalPlaylists();
@@ -333,7 +346,7 @@ public class MainActivity extends Activity {
         setupSpinners();
         setupVinylAnimation();
         updateCoverDisplayMode();
-        updatePlazaViewModeUI();
+        updatePlazaViewModeState();
         loadSavedConfig();
         setupNavigation();
         setupListeners();
@@ -392,6 +405,7 @@ public class MainActivity extends Activity {
         btnSearchSubmit = (Button) findViewById(R.id.btn_search_submit);
         btnSearchBack = (Button) findViewById(R.id.btn_search_back);
         btnToggleHotSearch = (Button) findViewById(R.id.btn_toggle_hot_search);
+
         layoutHotSearchBox = (LinearLayout) findViewById(R.id.layout_hot_search_box);
         layoutHotSearchTags = (LinearLayout) findViewById(R.id.layout_hot_search_tags);
         tvHotSearchTitle = (TextView) findViewById(R.id.tv_hot_search_title);
@@ -406,7 +420,6 @@ public class MainActivity extends Activity {
 
         // 歌单广场
         spinnerPlazaPlatform = (Spinner) findViewById(R.id.spinner_plaza_platform);
-        spinnerPlazaSort = (Spinner) findViewById(R.id.spinner_plaza_sort);
         btnPlazaCategory = (Button) findViewById(R.id.btn_plaza_category);
         btnPlazaViewMode = (Button) findViewById(R.id.btn_plaza_view_mode);
         btnPlazaRefresh = (Button) findViewById(R.id.btn_plaza_refresh);
@@ -415,8 +428,18 @@ public class MainActivity extends Activity {
         btnPlazaBack = (Button) findViewById(R.id.btn_plaza_back);
         etPlazaSearch = (EditText) findViewById(R.id.et_plaza_search);
         tvPlazaCurrentTag = (TextView) findViewById(R.id.tv_plaza_current_tag);
-        lvPlazaPlaylists = (ListView) findViewById(R.id.lv_plaza_playlists);
+        layoutPlazaSortContainer = (LinearLayout) findViewById(R.id.layout_plaza_sort_container);
         gvPlazaPlaylists = (GridView) findViewById(R.id.gv_plaza_playlists);
+        lvPlazaPlaylists = (ListView) findViewById(R.id.lv_plaza_playlists);
+
+        // 广场分页加载 Footer
+        footerPlazaLoading = new TextView(this);
+        footerPlazaLoading.setText("点击或滑动加载下一页...");
+        footerPlazaLoading.setGravity(Gravity.CENTER);
+        footerPlazaLoading.setPadding(0, 24, 0, 24);
+        footerPlazaLoading.setTextColor(0xFF888888);
+        footerPlazaLoading.setTextSize(13);
+        lvPlazaPlaylists.addFooterView(footerPlazaLoading);
 
         plazaPlaylistsAdapter = new SimpleAdapter(this, plazaPlaylistsData, android.R.layout.simple_list_item_2,
                 new String[]{"title", "subtitle"}, new int[]{android.R.id.text1, android.R.id.text2});
@@ -473,7 +496,7 @@ public class MainActivity extends Activity {
         btnSaveSettings = (Button) findViewById(R.id.btn_save_settings);
         tvCacheUsed = (TextView) findViewById(R.id.tv_cache_used);
 
-        // 底部播放控制器
+        // 底部播放条
         layoutBottomPlayer = (LinearLayout) findViewById(R.id.layout_bottom_player);
         ivBottomCover = (ImageView) findViewById(R.id.iv_bottom_cover);
         tvCurrentSong = (TextView) findViewById(R.id.tv_current_song);
@@ -539,13 +562,15 @@ public class MainActivity extends Activity {
         lvDetailQueue.setAdapter(detailQueueAdapter);
     }
 
-    private void updatePlazaViewModeUI() {
-        if (btnPlazaViewMode != null) {
-            btnPlazaViewMode.setText(isPlazaGridView ? "☰ 列表" : "⊞ 网格");
-        }
-        if (lvPlazaPlaylists != null && gvPlazaPlaylists != null) {
-            lvPlazaPlaylists.setVisibility(isPlazaGridView ? View.GONE : View.VISIBLE);
-            gvPlazaPlaylists.setVisibility(isPlazaGridView ? View.VISIBLE : View.GONE);
+    private void updatePlazaViewModeState() {
+        if (isPlazaGridMode) {
+            gvPlazaPlaylists.setVisibility(View.VISIBLE);
+            lvPlazaPlaylists.setVisibility(View.GONE);
+            btnPlazaViewMode.setText("⊞ 网格");
+        } else {
+            gvPlazaPlaylists.setVisibility(View.GONE);
+            lvPlazaPlaylists.setVisibility(View.VISIBLE);
+            btnPlazaViewMode.setText("☰ 列表");
         }
     }
 
@@ -559,10 +584,10 @@ public class MainActivity extends Activity {
             parentScroll.setVisibility(isHotSearchCollapsed ? View.GONE : View.VISIBLE);
         }
         if (btnToggleHotSearch != null) {
-            btnToggleHotSearch.setText(isHotSearchCollapsed ? "展开" : "收起");
+            btnToggleHotSearch.setText(isHotSearchCollapsed ? "展开 ▾" : "收起 ▴");
         }
         if (tvHotSearchTitle != null) {
-            tvHotSearchTitle.setText(isHotSearchCollapsed ? "🔥 平台热门搜索 [展开 ▾]" : "🔥 平台热门搜索 [收起 ▴]");
+            tvHotSearchTitle.setText(isHotSearchCollapsed ? "🔥 平台热门搜索 [点击展开]" : "🔥 平台热门搜索");
         }
         Toast.makeText(MainActivity.this, isHotSearchCollapsed ? "已收起热门搜索" : "已展开热门搜索", Toast.LENGTH_SHORT).show();
     }
@@ -607,7 +632,7 @@ public class MainActivity extends Activity {
         if (page == PAGE_SEARCH) {
             fetchHotSearchForCurrentPlatform();
         } else if (page == PAGE_PLAZA) {
-            updatePlazaSortOptionsForCurrentPlatform();
+            setupPlazaSortButtons();
             loadPlazaSonglists(true);
         } else if (page == PAGE_RANKING) {
             loadLeaderboardBoards();
@@ -617,6 +642,48 @@ public class MainActivity extends Activity {
             scanLocalMusicFiles();
         } else if (page == PAGE_SETTINGS) {
             updateCacheSizeDisplay();
+        }
+    }
+
+    // 动态生成歌单广场排序胶囊按钮（如：最热 / 最新 / 推荐 / 飙升等）
+    private void setupPlazaSortButtons() {
+        int pos = spinnerPlazaPlatform.getSelectedItemPosition();
+        final String code = LxApiHelper.PLAZA_PLATFORM_CODES[pos >= 0 ? pos : 0];
+        final String[] sorts = LxApiHelper.getPlatformSorts(code);
+
+        layoutPlazaSortContainer.removeAllViews();
+        boolean currentSortValid = false;
+        for (String s : sorts) {
+            if (s.equals(currentPlazaSort)) {
+                currentSortValid = true;
+                break;
+            }
+        }
+        if (!currentSortValid) currentPlazaSort = sorts[0];
+
+        float density = getResources().getDisplayMetrics().density;
+        for (final String sName : sorts) {
+            final Button sBtn = new Button(this);
+            sBtn.setText(sName);
+            sBtn.setTextSize(10);
+            boolean isSelected = sName.equals(currentPlazaSort);
+            sBtn.setTextColor(isSelected ? 0xFF00E5FF : 0xFF94A3B8);
+            sBtn.setBackgroundResource(isSelected ? R.drawable.bg_btn_accent : R.drawable.bg_btn_default);
+            sBtn.setPadding((int)(8 * density), 0, (int)(8 * density), 0);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, (int)(24 * density));
+            lp.leftMargin = (int)(4 * density);
+            sBtn.setLayoutParams(lp);
+            sBtn.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    if (!sName.equals(currentPlazaSort)) {
+                        currentPlazaSort = sName;
+                        setupPlazaSortButtons();
+                        loadPlazaSonglists(true);
+                    }
+                }
+            });
+            layoutPlazaSortContainer.addView(sBtn);
         }
     }
 
@@ -717,7 +784,7 @@ public class MainActivity extends Activity {
                     } else if (artObj instanceof JSONObject) {
                         addArtistRow((JSONObject) artObj, searchResultsList, searchResultsData);
                     }
-                    tvSearchResultTitle.setText("歌手结果: " + query + " (点击查看专辑)");
+                    tvSearchResultTitle.setText("歌手结果: " + query + " (长按操作/点击查看专辑)");
                 } else if (typePos == 2 && result.has("album")) {
                     Object albObj = result.get("album");
                     if (albObj instanceof JSONArray) {
@@ -726,7 +793,7 @@ public class MainActivity extends Activity {
                     } else if (albObj instanceof JSONObject) {
                         addAlbumRow((JSONObject) albObj, searchResultsList, searchResultsData);
                     }
-                    tvSearchResultTitle.setText("专辑结果: " + query + " (点击查看歌曲)");
+                    tvSearchResultTitle.setText("专辑结果: " + query + " (长按操作/点击查看歌曲)");
                 } else if (result.has("song")) {
                     Object sObj = result.get("song");
                     ArrayList<Map<String, String>> dummy = new ArrayList<Map<String, String>>();
@@ -770,7 +837,7 @@ public class MainActivity extends Activity {
                 searchResultsData.add(row);
             }
         }
-        tvSearchResultTitle.setText("歌曲结果: " + query + " (共 " + searchResultsList.size() + " 首)");
+        tvSearchResultTitle.setText("歌曲结果: " + query + " (共 " + searchResultsList.size() + " 首，长按可操作)");
         searchResultsAdapter.notifyDataSetChanged();
     }
 
@@ -807,7 +874,7 @@ public class MainActivity extends Activity {
                                 } else if (albObj instanceof JSONObject) {
                                     addAlbumRow((JSONObject) albObj, searchResultsList, searchResultsData);
                                 }
-                                tvSearchResultTitle.setText("⬅ [返回搜索] " + artistName + " 的专辑");
+                                tvSearchResultTitle.setText("⬅ [返回搜索] " + artistName + " 的专辑列表 (长按可操作)");
                                 if (btnSearchBack != null) btnSearchBack.setVisibility(View.VISIBLE);
                                 searchResultsAdapter.notifyDataSetChanged();
                             }
@@ -854,19 +921,7 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    // 动态刷新当前平台对应的排序选项 (最热/最新/推荐等)
-    private void updatePlazaSortOptionsForCurrentPlatform() {
-        int pos = spinnerPlazaPlatform.getSelectedItemPosition();
-        final String code = LxApiHelper.PLAZA_PLATFORM_CODES[pos >= 0 ? pos : 0];
-        final String[][] sortOpts = LxApiHelper.getSortOptions(code);
-        String[] labels = new String[sortOpts.length];
-        for (int i = 0; i < sortOpts.length; i++) labels[i] = sortOpts[i][0];
-
-        spinnerPlazaSort.setAdapter(new SimpleDarkAdapter(labels));
-        if (sortOpts.length > 0) currentPlazaSort = sortOpts[0][1];
-    }
-
-    // 加载广场歌单 (支持分页与排序)
+    // 歌单广场加载：支持刷新重载与分页加载更多
     private void loadPlazaSonglists(boolean isRefresh) {
         if (isLoadingPlaza) return;
         btnPlazaBack.setVisibility(View.GONE);
@@ -874,7 +929,6 @@ public class MainActivity extends Activity {
         int pos = spinnerPlazaPlatform.getSelectedItemPosition();
         final String code = LxApiHelper.PLAZA_PLATFORM_CODES[pos >= 0 ? pos : 0];
         final String tag = currentPlazaTag;
-        final String sort = currentPlazaSort;
 
         if (isRefresh) {
             currentPlazaPage = 1;
@@ -883,40 +937,50 @@ public class MainActivity extends Activity {
             plazaPlaylistsData.clear();
             plazaPlaylistsAdapter.notifyDataSetChanged();
             plazaGridAdapter.notifyDataSetChanged();
+            footerPlazaLoading.setText("正在刷新第 1 页歌单...");
         } else {
             if (!hasMorePlaza) return;
+            footerPlazaLoading.setText("正在加载第 " + currentPlazaPage + " 页...");
         }
 
-        tvPlazaCurrentTag.setText("分类: " + (tag.length() > 0 ? tag : "全部") + " (第 " + currentPlazaPage + " 页)");
+        tvPlazaCurrentTag.setText("当前分类: " + (tag.length() > 0 ? tag : "全部歌单") + " · " + currentPlazaSort + " (第 " + currentPlazaPage + " 页)");
         isLoadingPlaza = true;
 
         new Thread(new Runnable() {
             @Override
             public void run() {
-                final ArrayList<LxApiHelper.PlaylistInfo> list = LxApiHelper.fetchPlaylists(code, tag, sort, currentPlazaPage);
+                final ArrayList<LxApiHelper.PlaylistInfo> list = LxApiHelper.fetchPlaylists(code, tag, currentPlazaSort, currentPlazaPage);
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
                         isLoadingPlaza = false;
                         if (list != null && !list.isEmpty()) {
                             for (LxApiHelper.PlaylistInfo info : list) {
+                                String playCountFmt = formatPlayCount(info.playCount);
                                 DisplayEntry entry = new DisplayEntry(info.id, info.name, info.author,
-                                        "播放量: " + info.playCount, info.coverImg, "歌单", false);
+                                        playCountFmt, info.coverImg, "歌单", false);
                                 plazaPlaylistsList.add(entry);
                                 Map<String, String> row = new HashMap<String, String>();
                                 row.put("title", info.name);
-                                row.put("subtitle", (info.author.length() > 0 ? (info.author + " · ") : "") + "播放量: " + info.playCount);
+                                row.put("subtitle", (info.author.length() > 0 ? (info.author + " · ") : "") + playCountFmt);
                                 plazaPlaylistsData.add(row);
                             }
                             plazaPlaylistsAdapter.notifyDataSetChanged();
                             plazaGridAdapter.notifyDataSetChanged();
                             if (list.size() < 25) {
                                 hasMorePlaza = false;
+                                footerPlazaLoading.setText("已加载全部歌单");
                             } else {
                                 currentPlazaPage++;
+                                footerPlazaLoading.setText("点击或滑动加载下一页 (第 " + currentPlazaPage + " 页)...");
                             }
                         } else {
-                            hasMorePlaza = false;
+                            if (plazaPlaylistsList.isEmpty()) {
+                                footerPlazaLoading.setText("暂无歌单数据，点击重试");
+                            } else {
+                                hasMorePlaza = false;
+                                footerPlazaLoading.setText("已加载全部歌单");
+                            }
                         }
                     }
                 });
@@ -924,13 +988,25 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    // 搜索广场歌单
+    private String formatPlayCount(String countStr) {
+        try {
+            long c = Long.parseLong(countStr.replaceAll("[^0-9]", ""));
+            if (c > 100000000) return String.format("%.1f亿", c / 100000000.0);
+            if (c > 10000) return String.format("%.1f万", c / 10000.0);
+            return String.valueOf(c);
+        } catch (Exception e) {
+            return countStr != null && countStr.length() > 0 ? countStr : "热门";
+        }
+    }
+
+    // 歌单搜索：支持分页
     private void performPlazaSearch(final String keyword, boolean isRefresh) {
         if (keyword == null || keyword.trim().length() == 0) return;
         if (isLoadingPlaza) return;
         btnPlazaBack.setVisibility(View.VISIBLE);
         isPlazaSearchMode = true;
         currentPlazaSearchKeyword = keyword.trim();
+
         int pos = spinnerPlazaPlatform.getSelectedItemPosition();
         final String code = LxApiHelper.PLAZA_PLATFORM_CODES[pos >= 0 ? pos : 0];
 
@@ -941,11 +1017,13 @@ public class MainActivity extends Activity {
             plazaPlaylistsData.clear();
             plazaPlaylistsAdapter.notifyDataSetChanged();
             plazaGridAdapter.notifyDataSetChanged();
+            footerPlazaLoading.setText("正在搜索第 1 页歌单...");
         } else {
             if (!hasMorePlaza) return;
+            footerPlazaLoading.setText("正在加载第 " + currentPlazaPage + " 页搜索结果...");
         }
 
-        tvPlazaCurrentTag.setText("搜索: " + currentPlazaSearchKeyword + " (第 " + currentPlazaPage + " 页)");
+        tvPlazaCurrentTag.setText("搜索歌单: " + currentPlazaSearchKeyword + " (第 " + currentPlazaPage + " 页)");
         isLoadingPlaza = true;
 
         new Thread(new Runnable() {
@@ -958,23 +1036,31 @@ public class MainActivity extends Activity {
                         isLoadingPlaza = false;
                         if (list != null && !list.isEmpty()) {
                             for (LxApiHelper.PlaylistInfo info : list) {
+                                String playCountFmt = formatPlayCount(info.playCount);
                                 DisplayEntry entry = new DisplayEntry(info.id, info.name, info.author,
-                                        "播放量: " + info.playCount, info.coverImg, "歌单", false);
+                                        playCountFmt, info.coverImg, "歌单", false);
                                 plazaPlaylistsList.add(entry);
                                 Map<String, String> row = new HashMap<String, String>();
                                 row.put("title", info.name);
-                                row.put("subtitle", (info.author.length() > 0 ? (info.author + " · ") : "") + "播放量: " + info.playCount);
+                                row.put("subtitle", (info.author.length() > 0 ? (info.author + " · ") : "") + playCountFmt);
                                 plazaPlaylistsData.add(row);
                             }
                             plazaPlaylistsAdapter.notifyDataSetChanged();
                             plazaGridAdapter.notifyDataSetChanged();
                             if (list.size() < 25) {
                                 hasMorePlaza = false;
+                                footerPlazaLoading.setText("已加载全部搜索结果");
                             } else {
                                 currentPlazaPage++;
+                                footerPlazaLoading.setText("点击或滑动加载下一页 (第 " + currentPlazaPage + " 页)...");
                             }
                         } else {
-                            hasMorePlaza = false;
+                            if (plazaPlaylistsList.isEmpty()) {
+                                footerPlazaLoading.setText("未搜到相关歌单");
+                            } else {
+                                hasMorePlaza = false;
+                                footerPlazaLoading.setText("已加载全部搜索结果");
+                            }
                         }
                     }
                 });
@@ -982,131 +1068,31 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    // 全新现代分类选择面板（完全对齐 LX Music 的弹窗分类体验）
     private void showCategoryDialog() {
         int pos = spinnerPlazaPlatform.getSelectedItemPosition();
         String code = LxApiHelper.PLAZA_PLATFORM_CODES[pos >= 0 ? pos : 0];
-        final Map<String, String[]> categories = LxApiHelper.getPresetCategories(code);
+        Map<String, String[]> categories = LxApiHelper.getPresetCategories(code);
 
-        final Dialog dialog = new Dialog(this);
-        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        final ArrayList<String> flatTags = new ArrayList<String>();
+        flatTags.add("全部");
+        for (Map.Entry<String, String[]> entry : categories.entrySet()) {
+            flatTags.add("--- " + entry.getKey() + " ---");
+            for (String t : entry.getValue()) flatTags.add(t);
+        }
 
-        float density = getResources().getDisplayMetrics().density;
-        ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(true);
-
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundResource(R.drawable.bg_card);
-        root.setPadding((int)(16 * density), (int)(16 * density), (int)(16 * density), (int)(16 * density));
-
-        // 标题与关闭
-        RelativeLayout header = new RelativeLayout(this);
-        TextView tvTitle = new TextView(this);
-        tvTitle.setText("选择分类 (" + LxApiHelper.PLAZA_PLATFORM_NAMES[pos] + ")");
-        tvTitle.setTextColor(0xFF00E5FF);
-        tvTitle.setTextSize(16);
-        tvTitle.setTypeface(null, Typeface.BOLD);
-        header.addView(tvTitle);
-
-        Button btnClose = new Button(this);
-        btnClose.setText("✕");
-        btnClose.setTextColor(0xFFCCCCCC);
-        btnClose.setTextSize(14);
-        btnClose.setBackgroundColor(Color.TRANSPARENT);
-        RelativeLayout.LayoutParams closeLp = new RelativeLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        closeLp.addRule(RelativeLayout.ALIGN_PARENT_RIGHT);
-        btnClose.setLayoutParams(closeLp);
-        btnClose.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { dialog.dismiss(); }
-        });
-        header.addView(btnClose);
-        root.addView(header);
-
-        // 默认全部分类按键
-        TextView tvDef = new TextView(this);
-        tvDef.setText("默认");
-        tvDef.setTextColor(0xFF888C99);
-        tvDef.setTextSize(12);
-        tvDef.setPadding(0, (int)(10 * density), 0, (int)(4 * density));
-        root.addView(tvDef);
-
-        Button btnAll = new Button(this);
-        btnAll.setText("全部分类");
-        btnAll.setTextColor(currentPlazaTag.isEmpty() ? 0xFF00E5FF : 0xFFCBD5E1);
-        btnAll.setTextSize(12);
-        btnAll.setBackgroundResource(currentPlazaTag.isEmpty() ? R.drawable.bg_btn_pill_accent : R.drawable.bg_btn_pill);
-        LinearLayout.LayoutParams allLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, (int)(32 * density));
-        btnAll.setLayoutParams(allLp);
-        btnAll.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                currentPlazaTag = "";
-                btnPlazaCategory.setText("全部分类 ▾");
-                dialog.dismiss();
-                loadPlazaSonglists(true);
-            }
-        });
-        root.addView(btnAll);
-
-        // 遍历所有大分类维度 (语种、风格、场景、心情、主题、年代等)
-        for (final Map.Entry<String, String[]> entry : categories.entrySet()) {
-            TextView tvSec = new TextView(this);
-            tvSec.setText(entry.getKey());
-            tvSec.setTextColor(0xFF00E5FF);
-            tvSec.setTextSize(13);
-            tvSec.setTypeface(null, Typeface.BOLD);
-            tvSec.setPadding(0, (int)(12 * density), 0, (int)(6 * density));
-            root.addView(tvSec);
-
-            // 分组内流式/换行按钮排布
-            LinearLayout rowLayout = null;
-            int currentLineWidth = 0;
-            int maxRowWidth = (int)(320 * density);
-
-            for (final String tag : entry.getValue()) {
-                if (rowLayout == null || currentLineWidth > maxRowWidth - (int)(80 * density)) {
-                    rowLayout = new LinearLayout(this);
-                    rowLayout.setOrientation(LinearLayout.HORIZONTAL);
-                    rowLayout.setPadding(0, 0, 0, (int)(6 * density));
-                    root.addView(rowLayout);
-                    currentLineWidth = 0;
-                }
-
-                Button tagBtn = new Button(this);
-                tagBtn.setText(tag);
-                boolean isSelected = tag.equals(currentPlazaTag);
-                tagBtn.setTextColor(isSelected ? 0xFF00E5FF : 0xFFCBD5E1);
-                tagBtn.setTextSize(11);
-                tagBtn.setBackgroundResource(isSelected ? R.drawable.bg_btn_pill_accent : R.drawable.bg_btn_pill);
-                tagBtn.setPadding((int)(12 * density), 0, (int)(12 * density), 0);
-                LinearLayout.LayoutParams tagLp = new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.WRAP_CONTENT, (int)(30 * density));
-                tagLp.rightMargin = (int)(6 * density);
-                tagBtn.setLayoutParams(tagLp);
-
-                tagBtn.setOnClickListener(new View.OnClickListener() {
+        new AlertDialog.Builder(this)
+                .setTitle("选择分类 (" + LxApiHelper.PLAZA_PLATFORM_NAMES[pos] + ")")
+                .setItems(flatTags.toArray(new String[0]), new DialogInterface.OnClickListener() {
                     @Override
-                    public void onClick(View v) {
-                        currentPlazaTag = tag;
-                        btnPlazaCategory.setText(tag + " ▾");
-                        dialog.dismiss();
+                    public void onClick(DialogInterface dialog, int which) {
+                        String selected = flatTags.get(which);
+                        if (selected.startsWith("---")) return;
+                        currentPlazaTag = "全部".equals(selected) ? "" : selected;
+                        btnPlazaCategory.setText(selected + " ▾");
                         loadPlazaSonglists(true);
                     }
-                });
-                rowLayout.addView(tagBtn);
-                currentLineWidth += (int)(65 * density);
-            }
-        }
-
-        scroll.addView(root);
-        dialog.setContentView(scroll);
-        if (dialog.getWindow() != null) {
-            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-            dialog.getWindow().setLayout((int)(380 * density), (int)(460 * density));
-        }
-        dialog.show();
+                })
+                .show();
     }
 
     private void promptImportPlaylist() {
@@ -1156,6 +1142,7 @@ public class MainActivity extends Activity {
         plazaPlaylistsData.clear();
         plazaPlaylistsAdapter.notifyDataSetChanged();
         plazaGridAdapter.notifyDataSetChanged();
+        footerPlazaLoading.setText("正在加载歌单内歌曲...");
 
         new Thread(new Runnable() {
             @Override
@@ -1175,6 +1162,7 @@ public class MainActivity extends Activity {
                         }
                         plazaPlaylistsAdapter.notifyDataSetChanged();
                         plazaGridAdapter.notifyDataSetChanged();
+                        footerPlazaLoading.setText("共 " + plazaPlaylistsList.size() + " 首歌曲 (已全部加载)");
                     }
                 });
             }
@@ -1227,7 +1215,7 @@ public class MainActivity extends Activity {
                             rankingSongsData.add(row);
                         }
                         rankingSongsAdapter.notifyDataSetChanged();
-                        tvRankingBoardTitle.setText(board.title + " (共 " + rankingSongsList.size() + " 首)");
+                        tvRankingBoardTitle.setText(board.title + " (前 " + rankingSongsList.size() + " 首)");
                     }
                 });
             }
@@ -1565,22 +1553,8 @@ public class MainActivity extends Activity {
             public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
                 currentPlazaTag = "";
                 btnPlazaCategory.setText("全部分类 ▾");
-                updatePlazaSortOptionsForCurrentPlatform();
+                setupPlazaSortButtons();
                 loadPlazaSonglists(true);
-            }
-            @Override public void onNothingSelected(AdapterView<?> parent) {}
-        });
-
-        spinnerPlazaSort.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override
-            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                int pPos = spinnerPlazaPlatform.getSelectedItemPosition();
-                String code = LxApiHelper.PLAZA_PLATFORM_CODES[pPos >= 0 ? pPos : 0];
-                String[][] sortOpts = LxApiHelper.getSortOptions(code);
-                if (position >= 0 && position < sortOpts.length) {
-                    currentPlazaSort = sortOpts[position][1];
-                    loadPlazaSonglists(true);
-                }
             }
             @Override public void onNothingSelected(AdapterView<?> parent) {}
         });
@@ -1615,6 +1589,7 @@ public class MainActivity extends Activity {
             });
         }
 
+        // 热门搜索折叠/展开
         View.OnClickListener hotToggleListener = new View.OnClickListener() {
             @Override public void onClick(View v) { toggleHotSearchBox(); }
         };
@@ -1627,6 +1602,7 @@ public class MainActivity extends Activity {
             }
         });
 
+        // 搜索列表点击
         lvSearchResults.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             @Override
             public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
@@ -1644,6 +1620,7 @@ public class MainActivity extends Activity {
             }
         });
 
+        // 搜索列表长按（无论是歌手、专辑还是歌曲均支持）
         lvSearchResults.setOnItemLongClickListener(new AdapterView.OnItemLongClickListener() {
             @Override
             public boolean onItemLongClick(AdapterView<?> parent, View view, int position, long id) {
@@ -1660,44 +1637,37 @@ public class MainActivity extends Activity {
             }
         });
 
-        // 歌单广场
+        // 歌单广场分类、视图切换、刷新、导入与搜索
         btnPlazaCategory.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { showCategoryDialog(); }
         });
-
-        // 视图切换：网格视图 vs 列表视图
         btnPlazaViewMode.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                isPlazaGridView = !isPlazaGridView;
-                prefs.edit().putBoolean("is_plaza_grid_view", isPlazaGridView).commit();
-                updatePlazaViewModeUI();
-                Toast.makeText(MainActivity.this, isPlazaGridView ? "已切换为封面网格视图" : "已切换为单行列表视图", Toast.LENGTH_SHORT).show();
+            @Override public void onClick(View v) {
+                isPlazaGridMode = !isPlazaGridMode;
+                prefs.edit().putBoolean("is_plaza_grid_mode", isPlazaGridMode).commit();
+                updatePlazaViewModeState();
             }
         });
-
         btnPlazaRefresh.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 if (isPlazaSearchMode) performPlazaSearch(currentPlazaSearchKeyword, true);
                 else loadPlazaSonglists(true);
             }
         });
-
         btnPlazaImport.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { promptImportPlaylist(); }
         });
-
         btnPlazaBack.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { loadPlazaSonglists(true); }
         });
-
         btnPlazaSearchSubmit.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 performPlazaSearch(etPlazaSearch.getText().toString().trim(), true);
             }
         });
 
-        AdapterView.OnItemClickListener plazaItemClick = new AdapterView.OnItemClickListener() {
+        // 歌单广场列表点击与长按 (ListView)
+        lvPlazaPlaylists.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             @Override
             public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
                 if (position < 0 || position >= plazaPlaylistsList.size()) return;
@@ -1705,11 +1675,8 @@ public class MainActivity extends Activity {
                 if (!entry.isSong) openSonglistDetails(entry);
                 else playSongInList(plazaPlaylistsList, entry);
             }
-        };
-        lvPlazaPlaylists.setOnItemClickListener(plazaItemClick);
-        gvPlazaPlaylists.setOnItemClickListener(plazaItemClick);
-
-        AdapterView.OnItemLongClickListener plazaItemLongClick = new AdapterView.OnItemLongClickListener() {
+        });
+        lvPlazaPlaylists.setOnItemLongClickListener(new AdapterView.OnItemLongClickListener() {
             @Override
             public boolean onItemLongClick(AdapterView<?> parent, View view, int position, long id) {
                 if (position >= 0 && position < plazaPlaylistsList.size()) {
@@ -1720,15 +1687,63 @@ public class MainActivity extends Activity {
                 }
                 return false;
             }
-        };
-        lvPlazaPlaylists.setOnItemLongClickListener(plazaItemLongClick);
-        gvPlazaPlaylists.setOnItemLongClickListener(plazaItemLongClick);
+        });
 
-        // 排行榜
+        // 歌单广场网格点击与长按 (GridView)
+        gvPlazaPlaylists.setOnItemClickListener(new AdapterView.OnItemClickListener() {
+            @Override
+            public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
+                if (position < 0 || position >= plazaPlaylistsList.size()) return;
+                DisplayEntry entry = plazaPlaylistsList.get(position);
+                if (!entry.isSong) openSonglistDetails(entry);
+                else playSongInList(plazaPlaylistsList, entry);
+            }
+        });
+        gvPlazaPlaylists.setOnItemLongClickListener(new AdapterView.OnItemLongClickListener() {
+            @Override
+            public boolean onItemLongClick(AdapterView<?> parent, View view, int position, long id) {
+                if (position >= 0 && position < plazaPlaylistsList.size()) {
+                    DisplayEntry entry = plazaPlaylistsList.get(position);
+                    if (entry.isSong) showSongLongClickMenu(entry, position);
+                    else showPlaylistLongClickMenu(entry);
+                    return true;
+                }
+                return false;
+            }
+        });
+
+        // 列表 Footer 点击触发加载更多
+        footerPlazaLoading.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                if (hasMorePlaza && !isLoadingPlaza) {
+                    if (isPlazaSearchMode) performPlazaSearch(currentPlazaSearchKeyword, false);
+                    else loadPlazaSonglists(false);
+                }
+            }
+        });
+
+        // ListView 与 GridView 触底滑动监听加载更多
+        AbsListView.OnScrollListener autoScrollLoader = new AbsListView.OnScrollListener() {
+            @Override public void onScrollStateChanged(AbsListView view, int scrollState) {}
+            @Override
+            public void onScroll(AbsListView view, int firstVisibleItem, int visibleItemCount, int totalItemCount) {
+                if (!isBrowsingArtistOrAlbum && btnPlazaBack.getVisibility() != View.VISIBLE) {
+                    if (firstVisibleItem + visibleItemCount >= totalItemCount - 2 && totalItemCount > 5) {
+                        if (hasMorePlaza && !isLoadingPlaza) {
+                            if (isPlazaSearchMode) performPlazaSearch(currentPlazaSearchKeyword, false);
+                            else loadPlazaSonglists(false);
+                        }
+                    }
+                }
+            }
+        };
+        lvPlazaPlaylists.setOnScrollListener(autoScrollLoader);
+        gvPlazaPlaylists.setOnScrollListener(autoScrollLoader);
+
+        // 排行榜列表与刷新
         btnRankingRefresh.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { loadLeaderboardBoards(); }
         });
-
         lvRankingBoards.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             @Override
             public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
@@ -1737,7 +1752,6 @@ public class MainActivity extends Activity {
                 }
             }
         });
-
         lvRankingSongs.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             @Override
             public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
@@ -1746,7 +1760,6 @@ public class MainActivity extends Activity {
                 }
             }
         });
-
         lvRankingSongs.setOnItemLongClickListener(new AdapterView.OnItemLongClickListener() {
             @Override
             public boolean onItemLongClick(AdapterView<?> parent, View view, int position, long id) {
@@ -1765,7 +1778,6 @@ public class MainActivity extends Activity {
         btnFavBack.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { showFavAndCustomPlaylists(); }
         });
-
         lvFavPlaylists.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             @Override
             public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
@@ -1775,7 +1787,6 @@ public class MainActivity extends Activity {
                 else playSongInList(favPlaylistsList, entry);
             }
         });
-
         lvFavPlaylists.setOnItemLongClickListener(new AdapterView.OnItemLongClickListener() {
             @Override
             public boolean onItemLongClick(AdapterView<?> parent, View view, int position, long id) {
@@ -1793,7 +1804,6 @@ public class MainActivity extends Activity {
         btnScanLocalMusic.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { scanLocalMusicFiles(); }
         });
-
         lvLocalMusic.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             @Override
             public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
@@ -1802,7 +1812,6 @@ public class MainActivity extends Activity {
                 }
             }
         });
-
         lvLocalMusic.setOnItemLongClickListener(new AdapterView.OnItemLongClickListener() {
             @Override
             public boolean onItemLongClick(AdapterView<?> parent, View view, int position, long id) {
@@ -1817,107 +1826,15 @@ public class MainActivity extends Activity {
         btnSaveSettings.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { saveAndTestSettings(); }
         });
-
         btnClearCache.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 CacheManager.clearAllCache(MainActivity.this);
-                coverThumbnailCache.clear();
                 updateCacheSizeDisplay();
                 Toast.makeText(MainActivity.this, "本地缓存已清空", Toast.LENGTH_SHORT).show();
             }
         });
 
         setupPlaybackControls();
-    }
-
-    // 歌单网格适配器 (带封面图异步加载、圆角和播放量显示)
-    private class PlazaGridAdapter extends BaseAdapter {
-        @Override public int getCount() { return plazaPlaylistsList.size(); }
-        @Override public Object getItem(int position) { return plazaPlaylistsList.get(position); }
-        @Override public long getItemId(int position) { return position; }
-
-        @Override
-        public View getView(int position, View convertView, ViewGroup parent) {
-            final DisplayEntry item = plazaPlaylistsList.get(position);
-            LinearLayout layout;
-            ImageView ivCover;
-            TextView tvTitle;
-            TextView tvSub;
-
-            float density = getResources().getDisplayMetrics().density;
-            if (convertView == null) {
-                layout = new LinearLayout(MainActivity.this);
-                layout.setOrientation(LinearLayout.VERTICAL);
-                layout.setBackgroundResource(R.drawable.bg_card);
-                layout.setPadding((int)(6 * density), (int)(6 * density), (int)(6 * density), (int)(6 * density));
-
-                FrameLayout fl = new FrameLayout(MainActivity.this);
-                ivCover = new ImageView(MainActivity.this);
-                ivCover.setScaleType(ImageView.ScaleType.CENTER_CROP);
-                fl.addView(ivCover, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int)(110 * density)));
-                layout.addView(fl);
-
-                tvTitle = new TextView(MainActivity.this);
-                tvTitle.setTextColor(0xFFFFFFFF);
-                tvTitle.setTextSize(12);
-                tvTitle.setMaxLines(2);
-                tvTitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
-                tvTitle.setPadding(0, (int)(4 * density), 0, 0);
-                layout.addView(tvTitle);
-
-                tvSub = new TextView(MainActivity.this);
-                tvSub.setTextColor(0xFF888C99);
-                tvSub.setTextSize(10);
-                tvSub.setSingleLine(true);
-                layout.addView(tvSub);
-
-                layout.setTag(new View[]{ivCover, tvTitle, tvSub});
-            } else {
-                layout = (LinearLayout) convertView;
-                View[] holder = (View[]) layout.getTag();
-                ivCover = (ImageView) holder[0];
-                tvTitle = (TextView) holder[1];
-                tvSub = (TextView) holder[2];
-            }
-
-            tvTitle.setText(item.title);
-            tvSub.setText(item.subtitle);
-            ivCover.setImageResource(R.drawable.ic_launcher);
-
-            if (item.coverArt != null && item.coverArt.length() > 0) {
-                if (coverThumbnailCache.containsKey(item.coverArt)) {
-                    ivCover.setImageBitmap(coverThumbnailCache.get(item.coverArt));
-                } else {
-                    final ImageView targetIv = ivCover;
-                    final String coverUrl = item.coverArt;
-                    new Thread(new Runnable() {
-                        @Override
-                        public void run() {
-                            try {
-                                URL u = new URL(coverUrl);
-                                HttpURLConnection c = (HttpURLConnection) u.openConnection();
-                                c.setConnectTimeout(5000);
-                                c.setReadTimeout(5000);
-                                if (c instanceof HttpsURLConnection) {
-                                    ((HttpsURLConnection) c).setSSLSocketFactory(new TLSSocketFactory());
-                                }
-                                InputStream is = c.getInputStream();
-                                final Bitmap bmp = BitmapFactory.decodeStream(is);
-                                is.close();
-                                c.disconnect();
-                                if (bmp != null) {
-                                    coverThumbnailCache.put(coverUrl, bmp);
-                                    runOnUiThread(new Runnable() {
-                                        @Override public void run() { targetIv.setImageBitmap(bmp); }
-                                    });
-                                }
-                            } catch (Exception ignored) {}
-                        }
-                    }).start();
-                }
-            }
-            return layout;
-        }
     }
 
     private void showArtistOrAlbumLongClickMenu(final DisplayEntry entry) {
@@ -2133,7 +2050,8 @@ public class MainActivity extends Activity {
         detailSeekBar.setOnSeekBarChangeListener(seekListener);
 
         View.OnClickListener coverToggleListener = new View.OnClickListener() {
-            @Override public void onClick(View v) { toggleCoverDisplayMode(); }
+            @Override
+            public void onClick(View v) { toggleCoverDisplayMode(); }
         };
         layoutVinylContainer.setOnClickListener(coverToggleListener);
         ivVinylCircularCover.setOnClickListener(coverToggleListener);
@@ -2370,8 +2288,7 @@ public class MainActivity extends Activity {
         lp.topMargin = 16;
         btnRetryOnline.setLayoutParams(lp);
         btnRetryOnline.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
+            @Override public void onClick(View v) {
                 fetchOnlineThirdPartyLyrics(currentTitleForLyric, currentArtistForLyric);
             }
         });
@@ -2723,6 +2640,7 @@ public class MainActivity extends Activity {
         Toast.makeText(this, "已添加到播放队列末尾: " + entry.title, Toast.LENGTH_SHORT).show();
     }
 
+    // 歌单长按菜单
     private void showPlaylistLongClickMenu(final DisplayEntry playlistEntry) {
         boolean isPlatformPlazaPlaylist = playlistEntry.id.startsWith("tx_") || playlistEntry.id.startsWith("wy_")
                 || playlistEntry.id.startsWith("kg_") || playlistEntry.id.startsWith("kw_") || playlistEntry.id.startsWith("mg_");
@@ -2734,7 +2652,7 @@ public class MainActivity extends Activity {
         optList.add("＋ 添加全部到播放队列");
 
         if (isPlatformPlazaPlaylist) {
-            optList.add("⭐ 收藏歌单 (添加到我的收藏)");
+            optList.add("⭐ 收藏歌单 (添加到我的歌单)");
         } else if (!isLocalFixedPlaylist) {
             optList.add("✏ 重命名歌单");
             optList.add("🗑 删除歌单");
@@ -2763,8 +2681,9 @@ public class MainActivity extends Activity {
                 .show();
     }
 
+    // 收藏平台歌单到“我的歌单”
     private void bookmarkPlazaPlaylist(final DisplayEntry playlistEntry) {
-        Toast.makeText(this, "正在收藏歌单...", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "正在拉取全量歌曲并导入歌单...", Toast.LENGTH_SHORT).show();
         new Thread(new Runnable() {
             @Override
             public void run() {
@@ -2788,7 +2707,7 @@ public class MainActivity extends Activity {
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
-                            Toast.makeText(MainActivity.this, "已成功收藏到「我的收藏」！", Toast.LENGTH_SHORT).show();
+                            Toast.makeText(MainActivity.this, "已成功收藏到「我的收藏与歌单」！", Toast.LENGTH_SHORT).show();
                             fetchServerPlaylistsQuietly();
                         }
                     });
@@ -2798,7 +2717,7 @@ public class MainActivity extends Activity {
     }
 
     private void playAllFromPlaylist(final DisplayEntry pl) {
-        Toast.makeText(this, "正在载入歌单全部歌曲...", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "正在载入全部歌曲...", Toast.LENGTH_SHORT).show();
         new Thread(new Runnable() {
             @Override
             public void run() {
@@ -2831,7 +2750,7 @@ public class MainActivity extends Activity {
     }
 
     private void addAllToQueueFromPlaylist(final DisplayEntry pl) {
-        Toast.makeText(this, "正在将歌单歌曲加入队列...", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "正在将歌曲加入队列...", Toast.LENGTH_SHORT).show();
         new Thread(new Runnable() {
             @Override
             public void run() {
@@ -3578,6 +3497,89 @@ public class MainActivity extends Activity {
     protected void onDestroy() {
         super.onDestroy();
         dlnaSyncHandler.removeCallbacks(dlnaSyncRunnable);
+    }
+
+    // 歌单广场四方网格自定义适配器
+    private class PlazaGridAdapter extends BaseAdapter {
+        @Override public int getCount() { return plazaPlaylistsList.size(); }
+        @Override public Object getItem(int position) { return plazaPlaylistsList.get(position); }
+        @Override public long getItemId(int position) { return position; }
+
+        @Override
+        public View getView(int position, View convertView, ViewGroup parent) {
+            GridHolder holder;
+            if (convertView == null) {
+                convertView = LayoutInflater.from(MainActivity.this).inflate(R.layout.item_plaza_grid, parent, false);
+                holder = new GridHolder();
+                holder.ivCover = (ImageView) convertView.findViewById(R.id.iv_grid_cover);
+                holder.tvPlayCount = (TextView) convertView.findViewById(R.id.tv_grid_playcount);
+                holder.tvTitle = (TextView) convertView.findViewById(R.id.tv_grid_title);
+                holder.tvAuthor = (TextView) convertView.findViewById(R.id.tv_grid_author);
+                convertView.setTag(holder);
+            } else {
+                holder = (GridHolder) convertView.getTag();
+            }
+
+            DisplayEntry item = plazaPlaylistsList.get(position);
+            holder.tvTitle.setText(item.title);
+            holder.tvAuthor.setText(item.artist != null && item.artist.length() > 0 ? item.artist : "推荐歌单");
+            holder.tvPlayCount.setText("🎧 " + item.subtitle);
+
+            // 异步加载网格封面（带错位校正与内存缓存）
+            holder.ivCover.setImageResource(R.drawable.ic_launcher);
+            if (item.coverArt != null && item.coverArt.length() > 0) {
+                holder.ivCover.setTag(item.coverArt);
+                loadAsyncGridCover(item.coverArt, holder.ivCover);
+            }
+            return convertView;
+        }
+    }
+
+    private static class GridHolder {
+        ImageView ivCover;
+        TextView tvPlayCount;
+        TextView tvTitle;
+        TextView tvAuthor;
+    }
+
+    // 异步加载图片并缓存
+    private void loadAsyncGridCover(final String urlStr, final ImageView iv) {
+        if (imageMemoryCache != null) {
+            Bitmap cached = imageMemoryCache.get(urlStr);
+            if (cached != null) {
+                iv.setImageBitmap(cached);
+                return;
+            }
+        }
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    URL u = new URL(urlStr);
+                    HttpURLConnection conn = (HttpURLConnection) u.openConnection();
+                    conn.setConnectTimeout(4000);
+                    conn.setReadTimeout(5000);
+                    if (conn instanceof HttpsURLConnection) {
+                        ((HttpsURLConnection) conn).setSSLSocketFactory(new TLSSocketFactory());
+                    }
+                    InputStream is = conn.getInputStream();
+                    final Bitmap bmp = BitmapFactory.decodeStream(is);
+                    is.close();
+                    conn.disconnect();
+                    if (bmp != null) {
+                        if (imageMemoryCache != null) imageMemoryCache.put(urlStr, bmp);
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                if (iv.getTag() != null && iv.getTag().equals(urlStr)) {
+                                    iv.setImageBitmap(bmp);
+                                }
+                            }
+                        });
+                    }
+                } catch (Exception ignored) {}
+            }
+        }).start();
     }
 
     private class SimpleDarkAdapter extends BaseAdapter {
