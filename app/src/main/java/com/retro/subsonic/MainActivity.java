@@ -188,7 +188,6 @@ public class MainActivity extends Activity {
     private Handler lyricHandler = new Handler();
 
     private static LruCache<String, Bitmap> imageMemoryCache;
-    // 限制图片加载并发线程数，避免老旧 x86 架构 CPU 瞬时创建过多线程导致界面假死
     private static final ExecutorService imageLoadExecutor = Executors.newFixedThreadPool(3);
 
     private Handler dlnaSyncHandler = new Handler();
@@ -476,7 +475,6 @@ public class MainActivity extends Activity {
         btnFavBack = (Button) findViewById(R.id.btn_fav_back);
         lvFavPlaylists = (ListView) findViewById(R.id.lv_fav_playlists);
 
-        // 动态容错：若布局 XML 暂未添加 btn_fav_refresh，在新建歌单左侧自动动态注入刷新按钮
         if (btnFavRefresh == null && btnCreatePlaylist != null && btnCreatePlaylist.getParent() instanceof ViewGroup) {
             ViewGroup parent = (ViewGroup) btnCreatePlaylist.getParent();
             btnFavRefresh = new Button(this);
@@ -1908,7 +1906,6 @@ public class MainActivity extends Activity {
             }
         });
 
-        // 绑定收藏界面的“刷新”监听
         if (btnFavRefresh != null) {
             btnFavRefresh.setOnClickListener(new View.OnClickListener() {
                 @Override
@@ -2173,7 +2170,6 @@ public class MainActivity extends Activity {
             @Override public void onClick(View v) { layoutDetailOverlay.setVisibility(View.GONE); }
         });
 
-        // 打开侧滑播放队列并自动定位至当前曲目
         btnToggleQueue.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -2190,7 +2186,6 @@ public class MainActivity extends Activity {
             @Override public void onClick(View v) { layoutQueuePanel.setVisibility(View.GONE); }
         });
 
-        // 绑定播放队列点击切歌事件
         AdapterView.OnItemClickListener queueItemClickListener = new AdapterView.OnItemClickListener() {
             @Override
             public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
@@ -3219,15 +3214,22 @@ public class MainActivity extends Activity {
     }
 
     private boolean copyFile(File src, File dest) {
+        FileInputStream fis = null;
+        FileOutputStream fos = null;
         try {
-            FileInputStream fis = new FileInputStream(src);
-            FileOutputStream fos = new FileOutputStream(dest);
+            fis = new FileInputStream(src);
+            fos = new FileOutputStream(dest);
             byte[] buf = new byte[8192];
             int len;
             while ((len = fis.read(buf)) != -1) fos.write(buf, 0, len);
-            fos.flush(); fos.close(); is.close();
+            fos.flush();
             return true;
-        } catch (Exception e) { return false; }
+        } catch (Exception e) {
+            return false;
+        } finally {
+            try { if (fos != null) fos.close(); } catch (Exception ignored) {}
+            try { if (fis != null) fis.close(); } catch (Exception ignored) {}
+        }
     }
 
     private boolean downloadWithRedirects(String targetUrl, File destFile, int depth) throws Exception {
@@ -3282,7 +3284,6 @@ public class MainActivity extends Activity {
         detailQueueAdapter.notifyDataSetChanged();
     }
 
-    // 核心定位逻辑：打开队列后，平滑滚动至当前正在播放的曲目位置
     private void scrollToCurrentPlayingInQueue() {
         final int currentPlaying = MusicService.getCurrentIndex();
         if (currentPlaying >= 0 && currentPlaying < queueData.size()) {
@@ -3782,7 +3783,6 @@ public class MainActivity extends Activity {
         return super.onKeyDown(keyCode, event);
     }
 
-    // 针对老旧 x86 架构平板优化后的歌单网格适配器：低并发、View Tag 防错位
     private class PlazaGridAdapter extends BaseAdapter {
         @Override public int getCount() { return plazaPlaylistsList.size(); }
         @Override public Object getItem(int pos) { return plazaPlaylistsList.get(pos); }
