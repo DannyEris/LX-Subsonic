@@ -7,6 +7,7 @@ import android.graphics.Color;
 import android.graphics.LinearGradient;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.graphics.RectF;
 import android.graphics.Shader;
 import android.util.AttributeSet;
 import android.view.View;
@@ -27,6 +28,9 @@ public class TonearmView extends View {
     private Paint headPaint;
     private Paint needlePaint;
     private Path armPath;
+    
+    // 关键修正：预分配 RectF，兼容 Android 4.2 (API 17) 并避免 onDraw 频繁内存抖动
+    private RectF headRect = new RectF();
 
     public TonearmView(Context context) {
         super(context);
@@ -122,9 +126,12 @@ public class TonearmView extends View {
         canvas.save();
         canvas.translate(endArmX, endArmY);
         canvas.rotate(18); // 唱头顺应角度
-        canvas.drawRoundRect(-7 * density, 0, 7 * density, 22 * density, 3 * density, 3 * density, headPaint);
+        
+        // 使用 Android API 1+ 原生兼容的 drawRoundRect(RectF, rx, ry, Paint)
+        headRect.set(-7 * density, 0, 7 * density, 22 * density);
+        canvas.drawRoundRect(headRect, 3 * density, 3 * density, headPaint);
 
-        // 唱头高光边
+        // 唱头高光点
         headPaint.setColor(0xFF00E5FF);
         canvas.drawCircle(0, 5 * density, 2 * density, headPaint);
 
