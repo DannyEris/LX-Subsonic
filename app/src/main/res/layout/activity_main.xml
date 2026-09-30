@@ -295,7 +295,7 @@
                     </LinearLayout>
                 </LinearLayout>
 
-                <!-- 2. 歌单广场 -->
+                <!-- 2. 歌单广场页 (支持四方网格/列表切换、动态排序、分类选择) -->
                 <LinearLayout
                     android:id="@+id/layout_page_plaza"
                     android:layout_width="match_parent"
@@ -303,87 +303,58 @@
                     android:orientation="vertical"
                     android:visibility="gone">
 
-                    <!-- 顶部工具栏 -->
+                    <!-- 顶部筛选操作条 -->
                     <LinearLayout
                         android:layout_width="match_parent"
-                        android:layout_height="40dp"
+                        android:layout_height="38dp"
                         android:orientation="horizontal"
                         android:gravity="center_vertical">
-
                         <Spinner
                             android:id="@+id/spinner_plaza_platform"
                             android:layout_width="wrap_content"
-                            android:layout_height="34dp"
-                            android:background="@drawable/bg_btn_pill"
-                            android:paddingLeft="10dp"
-                            android:paddingRight="10dp"
-                            android:spinnerMode="dropdown" />
-
-                        <!-- 分类选择弹窗呼出按键 -->
-                        <Button
-                            android:id="@+id/btn_plaza_category"
-                            android:layout_width="wrap_content"
-                            android:layout_height="34dp"
-                            android:background="@drawable/bg_btn_default"
-                            android:text="全部分类 ▾"
-                            android:textColor="#00e5ff"
-                            android:textSize="12sp"
-                            android:paddingLeft="10dp"
-                            android:paddingRight="10dp"
-                            android:layout_marginLeft="6dp" />
-
-                        <!-- 排序切换 (最新/最热/推荐) -->
-                        <Spinner
-                            android:id="@+id/spinner_plaza_sort"
-                            android:layout_width="wrap_content"
-                            android:layout_height="34dp"
+                            android:layout_height="32dp"
                             android:background="@drawable/bg_btn_pill"
                             android:paddingLeft="8dp"
                             android:paddingRight="8dp"
-                            android:layout_marginLeft="6dp"
                             android:spinnerMode="dropdown" />
-
-                        <!-- 视图切换按键 (封面网格 / 纯列表) -->
+                        <Button
+                            android:id="@+id/btn_plaza_category"
+                            android:layout_width="wrap_content"
+                            android:layout_height="32dp"
+                            android:background="@drawable/bg_btn_default"
+                            android:text="全部分类 ▾"
+                            android:textColor="#00e5ff"
+                            android:textSize="11sp"
+                            android:paddingLeft="8dp"
+                            android:paddingRight="8dp"
+                            android:layout_marginLeft="4dp" />
+                        <!-- 视图切换按键：网格 / 列表 -->
                         <Button
                             android:id="@+id/btn_plaza_view_mode"
                             android:layout_width="wrap_content"
-                            android:layout_height="34dp"
+                            android:layout_height="32dp"
                             android:background="@drawable/bg_btn_default"
                             android:text="⊞ 网格"
-                            android:textColor="#cbd5e1"
-                            android:textSize="12sp"
-                            android:paddingLeft="10dp"
-                            android:paddingRight="10dp"
-                            android:layout_marginLeft="6dp" />
-
+                            android:textColor="#00e5ff"
+                            android:textSize="11sp"
+                            android:paddingLeft="8dp"
+                            android:paddingRight="8dp"
+                            android:layout_marginLeft="4dp" />
                         <Button
                             android:id="@+id/btn_plaza_refresh"
                             android:layout_width="wrap_content"
-                            android:layout_height="34dp"
+                            android:layout_height="32dp"
                             android:background="@drawable/bg_btn_default"
-                            android:text="刷新"
+                            android:text="🔄"
                             android:textColor="#e0e0e0"
                             android:textSize="12sp"
-                            android:paddingLeft="10dp"
-                            android:paddingRight="10dp"
-                            android:layout_marginLeft="6dp" />
-
-                        <Button
-                            android:id="@+id/btn_plaza_import"
-                            android:layout_width="wrap_content"
-                            android:layout_height="34dp"
-                            android:background="@drawable/bg_btn_default"
-                            android:text="导入"
-                            android:textColor="#e0e0e0"
-                            android:textSize="12sp"
-                            android:paddingLeft="10dp"
-                            android:paddingRight="10dp"
-                            android:layout_marginLeft="6dp" />
-
+                            android:paddingLeft="8dp"
+                            android:paddingRight="8dp"
+                            android:layout_marginLeft="4dp" />
                         <EditText
                             android:id="@+id/et_plaza_search"
                             android:layout_width="0dp"
-                            android:layout_height="34dp"
+                            android:layout_height="32dp"
                             android:layout_weight="1"
                             android:hint="搜索歌单..."
                             android:textColor="#ffffff"
@@ -392,80 +363,90 @@
                             android:paddingLeft="8dp"
                             android:paddingRight="8dp"
                             android:singleLine="true"
-                            android:layout_marginLeft="6dp" />
-
+                            android:layout_marginLeft="4dp" />
                         <Button
                             android:id="@+id/btn_plaza_search_submit"
                             android:layout_width="wrap_content"
-                            android:layout_height="34dp"
+                            android:layout_height="32dp"
                             android:background="@drawable/bg_btn_accent"
-                            android:text="搜索"
+                            android:text="搜歌单"
                             android:textColor="#00e5ff"
-                            android:textSize="12sp"
+                            android:textSize="11sp"
+                            android:layout_marginLeft="4dp" />
+                        <Button
+                            android:id="@+id/btn_plaza_import"
+                            android:layout_width="wrap_content"
+                            android:layout_height="32dp"
+                            android:background="@drawable/bg_btn_default"
+                            android:text="导入"
+                            android:textColor="#cbd5e1"
+                            android:textSize="11sp"
+                            android:paddingLeft="8dp"
+                            android:paddingRight="8dp"
                             android:layout_marginLeft="4dp" />
                     </LinearLayout>
 
-                    <!-- 歌单列表与网格容器 -->
+                    <!-- 二级排序栏 (如: 最热 / 最新 / 推荐 / 飙升) 与当前状态 -->
                     <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="30dp"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginTop="4dp">
+                        <TextView
+                            android:id="@+id/tv_plaza_current_tag"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="全部分类歌单"
+                            android:textColor="#a0a5b5"
+                            android:textSize="12sp"
+                            android:singleLine="true" />
+                        <!-- 动态生成的排序按钮组容器 -->
+                        <LinearLayout
+                            android:id="@+id/layout_plaza_sort_container"
+                            android:layout_width="wrap_content"
+                            android:layout_height="match_parent"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal" />
+                        <Button
+                            android:id="@+id/btn_plaza_back"
+                            android:layout_width="wrap_content"
+                            android:layout_height="24dp"
+                            android:background="@drawable/bg_btn_default"
+                            android:text="返回广场"
+                            android:textColor="#e0e0e0"
+                            android:textSize="10sp"
+                            android:layout_marginLeft="6dp"
+                            android:visibility="gone" />
+                    </LinearLayout>
+
+                    <!-- 歌单呈现容器：四方网格视图 与 传统列表视图 -->
+                    <FrameLayout
                         android:id="@+id/layout_plaza_list_container"
                         android:layout_width="match_parent"
                         android:layout_height="0dp"
                         android:layout_weight="1"
-                        android:orientation="vertical"
-                        android:layout_marginTop="6dp">
-
-                        <RelativeLayout
+                        android:layout_marginTop="4dp">
+                        <!-- 视图 1：四方网格视图 (横屏平板 4 列自适应) -->
+                        <GridView
+                            android:id="@+id/gv_plaza_playlists"
                             android:layout_width="match_parent"
-                            android:layout_height="28dp">
-                            <TextView
-                                android:id="@+id/tv_plaza_current_tag"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:layout_alignParentLeft="true"
-                                android:layout_centerVertical="true"
-                                android:text="当前分类: 全部"
-                                android:textColor="#a0a5b5"
-                                android:textSize="13sp" />
-
-                            <Button
-                                android:id="@+id/btn_plaza_back"
-                                android:layout_width="wrap_content"
-                                android:layout_height="26dp"
-                                android:layout_alignParentRight="true"
-                                android:layout_centerVertical="true"
-                                android:background="@drawable/bg_btn_default"
-                                android:text="⬅ 返回歌单"
-                                android:textColor="#e0e0e0"
-                                android:textSize="11sp"
-                                android:visibility="gone" />
-                        </RelativeLayout>
-
-                        <FrameLayout
+                            android:layout_height="match_parent"
+                            android:numColumns="4"
+                            android:horizontalSpacing="4dp"
+                            android:verticalSpacing="4dp"
+                            android:stretchMode="columnWidth"
+                            android:visibility="visible" />
+                        <!-- 视图 2：传统列表视图 -->
+                        <ListView
+                            android:id="@+id/lv_plaza_playlists"
                             android:layout_width="match_parent"
-                            android:layout_height="match_parent">
-
-                            <!-- 模式 1: 双行列表视图 -->
-                            <ListView
-                                android:id="@+id/lv_plaza_playlists"
-                                android:layout_width="match_parent"
-                                android:layout_height="match_parent"
-                                android:divider="#242730"
-                                android:dividerHeight="1dp"
-                                android:visibility="gone" />
-
-                            <!-- 模式 2: 封面网格视图 (默认 3 列卡片式布局) -->
-                            <GridView
-                                android:id="@+id/gv_plaza_playlists"
-                                android:layout_width="match_parent"
-                                android:layout_height="match_parent"
-                                android:numColumns="3"
-                                android:verticalSpacing="8dp"
-                                android:horizontalSpacing="8dp"
-                                android:stretchMode="columnWidth"
-                                android:gravity="center"
-                                android:visibility="visible" />
-                        </FrameLayout>
-                    </LinearLayout>
+                            android:layout_height="match_parent"
+                            android:divider="#242730"
+                            android:dividerHeight="1dp"
+                            android:visibility="gone" />
+                    </FrameLayout>
                 </LinearLayout>
 
                 <!-- 3. 排行榜页 -->
