@@ -45,6 +45,8 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.util.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import javax.net.ssl.HttpsURLConnection;
 
 public class MainActivity extends Activity {
@@ -118,9 +120,9 @@ public class MainActivity extends Activity {
     private ArrayList<Map<String, String>> rankingSongsData = new ArrayList<Map<String, String>>();
     private SimpleAdapter rankingSongsAdapter;
 
-    // 我的收藏
+    // 我的收藏与歌单
     private TextView tvFavTitle;
-    private Button btnCreatePlaylist, btnFavBack;
+    private Button btnFavRefresh, btnCreatePlaylist, btnFavBack;
     private ListView lvFavPlaylists;
     private ArrayList<DisplayEntry> favPlaylistsList = new ArrayList<DisplayEntry>();
     private ArrayList<Map<String, String>> favPlaylistsData = new ArrayList<Map<String, String>>();
@@ -186,6 +188,8 @@ public class MainActivity extends Activity {
     private Handler lyricHandler = new Handler();
 
     private static LruCache<String, Bitmap> imageMemoryCache;
+    // 限制图片加载并发线程数，避免老旧 x86 架构 CPU 瞬时创建过多线程导致界面假死
+    private static final ExecutorService imageLoadExecutor = Executors.newFixedThreadPool(3);
 
     private Handler dlnaSyncHandler = new Handler();
     private Runnable dlnaSyncRunnable = new Runnable() {
@@ -467,9 +471,25 @@ public class MainActivity extends Activity {
 
         // 我的收藏
         tvFavTitle = (TextView) findViewById(R.id.tv_fav_title);
+        btnFavRefresh = (Button) findViewById(R.id.btn_fav_refresh);
         btnCreatePlaylist = (Button) findViewById(R.id.btn_create_playlist);
         btnFavBack = (Button) findViewById(R.id.btn_fav_back);
         lvFavPlaylists = (ListView) findViewById(R.id.lv_fav_playlists);
+
+        // 动态容错：若布局 XML 暂未添加 btn_fav_refresh，在新建歌单左侧自动动态注入刷新按钮
+        if (btnFavRefresh == null && btnCreatePlaylist != null && btnCreatePlaylist.getParent() instanceof ViewGroup) {
+            ViewGroup parent = (ViewGroup) btnCreatePlaylist.getParent();
+            btnFavRefresh = new Button(this);
+            btnFavRefresh.setText("刷新");
+            btnFavRefresh.setTextSize(12);
+            btnFavRefresh.setTextColor(0xFFE0E0E0);
+            btnFavRefresh.setBackgroundResource(R.drawable.bg_btn_default);
+            float density = getResources().getDisplayMetrics().density;
+            btnFavRefresh.setPadding((int) (10 * density), 0, (int) (10 * density), 0);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, (int) (32 * density));
+            lp.rightMargin = (int) (6 * density);
+            parent.addView(btnFavRefresh, 0, lp);
+        }
 
         favPlaylistsAdapter = new SimpleAdapter(this, favPlaylistsData, android.R.layout.simple_list_item_2,
                 new String[]{"title", "subtitle"}, new int[]{android.R.id.text1, android.R.id.text2});
@@ -670,9 +690,9 @@ public class MainActivity extends Activity {
             boolean isSelected = sName.equals(currentPlazaSort);
             sBtn.setTextColor(isSelected ? 0xFF00E5FF : 0xFF94A3B8);
             sBtn.setBackgroundResource(isSelected ? R.drawable.bg_btn_accent : R.drawable.bg_btn_default);
-            sBtn.setPadding((int)(8 * density), 0, (int)(8 * density), 0);
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, (int)(24 * density));
-            lp.leftMargin = (int)(4 * density);
+            sBtn.setPadding((int) (8 * density), 0, (int) (8 * density), 0);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, (int) (24 * density));
+            lp.leftMargin = (int) (4 * density);
             sBtn.setLayoutParams(lp);
             sBtn.setOnClickListener(new View.OnClickListener() {
                 @Override
@@ -708,10 +728,10 @@ public class MainActivity extends Activity {
                             tagBtn.setTextColor(0xFFCBD5E1);
                             tagBtn.setTextSize(11);
                             tagBtn.setBackgroundResource(R.drawable.bg_btn_pill);
-                            tagBtn.setPadding((int)(10 * density), 0, (int)(10 * density), 0);
+                            tagBtn.setPadding((int) (10 * density), 0, (int) (10 * density), 0);
                             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                                    ViewGroup.LayoutParams.WRAP_CONTENT, (int)(28 * density));
-                            lp.rightMargin = (int)(6 * density);
+                                    ViewGroup.LayoutParams.WRAP_CONTENT, (int) (28 * density));
+                            lp.rightMargin = (int) (6 * density);
                             tagBtn.setLayoutParams(lp);
                             tagBtn.setOnClickListener(new View.OnClickListener() {
                                 @Override
@@ -1093,7 +1113,7 @@ public class MainActivity extends Activity {
         tvLoading.setText("正在联网同步官方最新分类目录...");
         tvLoading.setTextColor(0xFF00E5FF);
         tvLoading.setTextSize(13);
-        tvLoading.setPadding(0, (int)(20 * density), 0, (int)(20 * density));
+        tvLoading.setPadding(0, (int) (20 * density), 0, (int) (20 * density));
         tvLoading.setGravity(Gravity.CENTER);
         layoutContent.addView(tvLoading);
 
@@ -1117,7 +1137,7 @@ public class MainActivity extends Activity {
                         tvDefaultHeader.setText("默认分类");
                         tvDefaultHeader.setTextColor(0xFF888C99);
                         tvDefaultHeader.setTextSize(12);
-                        tvDefaultHeader.setPadding(0, (int)(4 * density), 0, (int)(6 * density));
+                        tvDefaultHeader.setPadding(0, (int) (4 * density), 0, (int) (6 * density));
                         layoutContent.addView(tvDefaultHeader);
 
                         Button btnAll = new Button(MainActivity.this);
@@ -1126,8 +1146,8 @@ public class MainActivity extends Activity {
                         boolean isAllSelected = (currentPlazaTagId == null || currentPlazaTagId.length() == 0 || "全部".equals(currentPlazaTagId));
                         btnAll.setTextColor(isAllSelected ? 0xFF10141A : 0xFFE0E0E0);
                         btnAll.setBackgroundResource(isAllSelected ? R.drawable.bg_category_tag_selected : R.drawable.bg_category_tag_normal);
-                        btnAll.setPadding((int)(14 * density), 0, (int)(14 * density), 0);
-                        LinearLayout.LayoutParams allLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, (int)(30 * density));
+                        btnAll.setPadding((int) (14 * density), 0, (int) (14 * density), 0);
+                        LinearLayout.LayoutParams allLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, (int) (30 * density));
                         btnAll.setLayoutParams(allLp);
                         btnAll.setOnClickListener(new View.OnClickListener() {
                             @Override public void onClick(View v) {
@@ -1146,7 +1166,7 @@ public class MainActivity extends Activity {
                             tvCatName.setTextColor(0xFF00E5FF);
                             tvCatName.setTextSize(13);
                             tvCatName.setTypeface(null, Typeface.BOLD);
-                            tvCatName.setPadding(0, (int)(12 * density), 0, (int)(6 * density));
+                            tvCatName.setPadding(0, (int) (12 * density), 0, (int) (6 * density));
                             layoutContent.addView(tvCatName);
 
                             ArrayList<LxApiHelper.CategoryTag> tags = entry.getValue();
@@ -1158,7 +1178,7 @@ public class MainActivity extends Activity {
                                     rowLayout = new LinearLayout(MainActivity.this);
                                     rowLayout.setOrientation(LinearLayout.HORIZONTAL);
                                     LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                                    rowLp.bottomMargin = (int)(6 * density);
+                                    rowLp.bottomMargin = (int) (6 * density);
                                     rowLayout.setLayoutParams(rowLp);
                                     layoutContent.addView(rowLayout);
                                 }
@@ -1169,9 +1189,9 @@ public class MainActivity extends Activity {
                                 boolean isSelected = (tag.id != null && tag.id.equals(currentPlazaTagId)) || tag.name.equals(currentPlazaTagName);
                                 tBtn.setTextColor(isSelected ? 0xFF10141A : 0xFFCBD5E1);
                                 tBtn.setBackgroundResource(isSelected ? R.drawable.bg_category_tag_selected : R.drawable.bg_category_tag_normal);
-                                tBtn.setPadding((int)(10 * density), 0, (int)(10 * density), 0);
-                                LinearLayout.LayoutParams tLp = new LinearLayout.LayoutParams(0, (int)(28 * density), 1.0f);
-                                tLp.rightMargin = (int)(4 * density);
+                                tBtn.setPadding((int) (10 * density), 0, (int) (10 * density), 0);
+                                LinearLayout.LayoutParams tLp = new LinearLayout.LayoutParams(0, (int) (28 * density), 1.0f);
+                                tLp.rightMargin = (int) (4 * density);
                                 tBtn.setLayoutParams(tLp);
                                 tBtn.setOnClickListener(new View.OnClickListener() {
                                     @Override public void onClick(View v) {
@@ -1648,6 +1668,7 @@ public class MainActivity extends Activity {
         }
         MusicService.setQueue(queue, clickedSongIndex, MainActivity.this);
         refreshQueueList();
+        scrollToCurrentPlayingInQueue();
         Toast.makeText(this, "正在播放: " + entry.title, Toast.LENGTH_SHORT).show();
     }
 
@@ -1887,6 +1908,33 @@ public class MainActivity extends Activity {
             }
         });
 
+        // 绑定收藏界面的“刷新”监听
+        if (btnFavRefresh != null) {
+            btnFavRefresh.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    if (currentActiveFavPlaylistId != null) {
+                        Toast.makeText(MainActivity.this, "正在刷新歌单...", Toast.LENGTH_SHORT).show();
+                        if ("fav_entry".equals(currentActiveFavPlaylistId)) {
+                            fetchServerFavoriteSongs();
+                        } else if ("local_featured".equals(currentActiveFavPlaylistId) || "local_car".equals(currentActiveFavPlaylistId)) {
+                            loadLocalPlaylists();
+                            openFavPlaylistSongs(new DisplayEntry(currentActiveFavPlaylistId, tvFavTitle.getText().toString(), "", "", null, "", false));
+                        } else {
+                            openFavPlaylistSongs(new DisplayEntry(currentActiveFavPlaylistId, tvFavTitle.getText().toString(), "", "", null, "", false));
+                        }
+                    } else {
+                        Toast.makeText(MainActivity.this, "正在刷新我的收藏与歌单...", Toast.LENGTH_SHORT).show();
+                        loadFavSet();
+                        loadLocalPlaylists();
+                        fetchServerFavoritesQuietly();
+                        fetchServerPlaylistsQuietly();
+                        showFavAndCustomPlaylists();
+                    }
+                }
+            });
+        }
+
         btnCreatePlaylist.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { promptCreatePlaylist(); }
         });
@@ -2125,19 +2173,40 @@ public class MainActivity extends Activity {
             @Override public void onClick(View v) { layoutDetailOverlay.setVisibility(View.GONE); }
         });
 
+        // 打开侧滑播放队列并自动定位至当前曲目
         btnToggleQueue.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                if (layoutQueuePanel.getVisibility() == View.VISIBLE) layoutQueuePanel.setVisibility(View.GONE);
-                else {
+                if (layoutQueuePanel.getVisibility() == View.VISIBLE) {
+                    layoutQueuePanel.setVisibility(View.GONE);
+                } else {
                     refreshQueueList();
                     layoutQueuePanel.setVisibility(View.VISIBLE);
+                    scrollToCurrentPlayingInQueue();
                 }
             }
         });
         btnCloseQueue.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { layoutQueuePanel.setVisibility(View.GONE); }
         });
+
+        // 绑定播放队列点击切歌事件
+        AdapterView.OnItemClickListener queueItemClickListener = new AdapterView.OnItemClickListener() {
+            @Override
+            public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
+                ArrayList<MusicService.SongItem> queue = MusicService.getPlaylist();
+                if (position >= 0 && position < queue.size()) {
+                    Intent intent = new Intent(MainActivity.this, MusicService.class);
+                    intent.setAction(MusicService.ACTION_PLAY_INDEX);
+                    intent.putExtra("target_index", position);
+                    startService(intent);
+                    refreshQueueList();
+                    scrollToCurrentPlayingInQueue();
+                }
+            }
+        };
+        lvQueue.setOnItemClickListener(queueItemClickListener);
+        lvDetailQueue.setOnItemClickListener(queueItemClickListener);
 
         SeekBar.OnSeekBarChangeListener seekListener = new SeekBar.OnSeekBarChangeListener() {
             @Override
@@ -2628,7 +2697,7 @@ public class MainActivity extends Activity {
                     if (bmp != null) {
                         final Bitmap circular = getCircularBitmap(bmp, 240);
                         float density = getResources().getDisplayMetrics().density;
-                        final Bitmap bottomRounded = getRoundedCornerBitmap(bmp, (int)(95 * density), 10 * density);
+                        final Bitmap bottomRounded = getRoundedCornerBitmap(bmp, (int) (95 * density), 10 * density);
                         runOnUiThread(new Runnable() {
                             @Override
                             public void run() {
@@ -2735,6 +2804,7 @@ public class MainActivity extends Activity {
             queue.add(curIdx + 1, item);
         }
         refreshQueueList();
+        scrollToCurrentPlayingInQueue();
         Toast.makeText(this, "已加入下一首播放: " + entry.title, Toast.LENGTH_SHORT).show();
     }
 
@@ -2756,6 +2826,7 @@ public class MainActivity extends Activity {
             queue.add(item);
         }
         refreshQueueList();
+        scrollToCurrentPlayingInQueue();
         Toast.makeText(this, "已添加到播放队列末尾: " + entry.title, Toast.LENGTH_SHORT).show();
     }
 
@@ -2901,6 +2972,7 @@ public class MainActivity extends Activity {
                                 q.add(new MusicService.SongItem(s.id, s.title, s.artist, pUrl, s.coverArt, s.quality));
                             }
                             refreshQueueList();
+                            scrollToCurrentPlayingInQueue();
                             Toast.makeText(MainActivity.this, "已添加 " + songs.size() + " 首歌到播放队列", Toast.LENGTH_SHORT).show();
                         }
                     }
@@ -3153,7 +3225,7 @@ public class MainActivity extends Activity {
             byte[] buf = new byte[8192];
             int len;
             while ((len = fis.read(buf)) != -1) fos.write(buf, 0, len);
-            fos.flush(); fos.close(); fis.close();
+            fos.flush(); fos.close(); is.close();
             return true;
         } catch (Exception e) { return false; }
     }
@@ -3208,6 +3280,25 @@ public class MainActivity extends Activity {
         }
         queueAdapter.notifyDataSetChanged();
         detailQueueAdapter.notifyDataSetChanged();
+    }
+
+    // 核心定位逻辑：打开队列后，平滑滚动至当前正在播放的曲目位置
+    private void scrollToCurrentPlayingInQueue() {
+        final int currentPlaying = MusicService.getCurrentIndex();
+        if (currentPlaying >= 0 && currentPlaying < queueData.size()) {
+            lvQueue.post(new Runnable() {
+                @Override
+                public void run() {
+                    lvQueue.setSelection(currentPlaying);
+                }
+            });
+            lvDetailQueue.post(new Runnable() {
+                @Override
+                public void run() {
+                    lvDetailQueue.setSelection(currentPlaying);
+                }
+            });
+        }
     }
 
     private void updateFavButtonState(String currentPlayingSongId) {
@@ -3325,7 +3416,6 @@ public class MainActivity extends Activity {
         } catch (Exception ignored) {}
     }
 
-    // 核心补齐：静默拉取远端收藏歌曲 ID 列表
     private void fetchServerFavoritesQuietly() {
         new Thread(new Runnable() {
             @Override
@@ -3365,7 +3455,6 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    // 补齐黑胶唱片与播放界面动效、配置相关方法
     private void setupVinylAnimation() {
         vinylRotateAnim = new RotateAnimation(0f, 360f, Animation.RELATIVE_TO_SELF, 0.5f, Animation.RELATIVE_TO_SELF, 0.5f);
         vinylRotateAnim.setDuration(20000);
@@ -3408,6 +3497,7 @@ public class MainActivity extends Activity {
             layoutDetailLyricsView.setVisibility(View.GONE);
             layoutDetailQueueView.setVisibility(View.VISIBLE);
             refreshQueueList();
+            scrollToCurrentPlayingInQueue();
         }
     }
 
@@ -3420,11 +3510,11 @@ public class MainActivity extends Activity {
     private void updateModeIcons(int mode) {
         int iconRes;
         if (mode == MusicService.MODE_SHUFFLE) {
-            iconRes = android.R.drawable.ic_menu_directions; // 随机
+            iconRes = android.R.drawable.ic_menu_directions;
         } else if (mode == MusicService.MODE_SINGLE) {
-            iconRes = android.R.drawable.ic_menu_revert;     // 单曲
+            iconRes = android.R.drawable.ic_menu_revert;
         } else {
-            iconRes = android.R.drawable.ic_menu_rotate;     // 列表循环
+            iconRes = android.R.drawable.ic_menu_rotate;
         }
         if (btnMode != null) btnMode.setImageResource(iconRes);
         if (btnDetailMode != null) btnDetailMode.setImageResource(iconRes);
@@ -3546,7 +3636,11 @@ public class MainActivity extends Activity {
         try {
             URL url = new URL(fullUrl);
             conn = (HttpURLConnection) url.openConnection();
-            int timeoutMs = Integer.parseInt(prefs.getString("timeout_sec", "30")) * 1000;
+            int timeoutSec = 30;
+            try {
+                timeoutSec = Integer.parseInt(prefs.getString("timeout_sec", "30"));
+            } catch (Exception ignored) {}
+            int timeoutMs = Math.max(5, timeoutSec) * 1000;
             conn.setConnectTimeout(timeoutMs);
             conn.setReadTimeout(timeoutMs);
             if (conn instanceof HttpsURLConnection) {
@@ -3688,7 +3782,7 @@ public class MainActivity extends Activity {
         return super.onKeyDown(keyCode, event);
     }
 
-    // 歌单网格适配器
+    // 针对老旧 x86 架构平板优化后的歌单网格适配器：低并发、View Tag 防错位
     private class PlazaGridAdapter extends BaseAdapter {
         @Override public int getCount() { return plazaPlaylistsList.size(); }
         @Override public Object getItem(int pos) { return plazaPlaylistsList.get(pos); }
@@ -3701,7 +3795,7 @@ public class MainActivity extends Activity {
                 view = LayoutInflater.from(MainActivity.this).inflate(R.layout.item_plaza_grid, parent, false);
             }
             DisplayEntry item = plazaPlaylistsList.get(pos);
-            ImageView ivCover = (ImageView) view.findViewById(R.id.iv_grid_cover);
+            final ImageView ivCover = (ImageView) view.findViewById(R.id.iv_grid_cover);
             TextView tvTitle = (TextView) view.findViewById(R.id.tv_grid_title);
             TextView tvAuthor = (TextView) view.findViewById(R.id.tv_grid_author);
             TextView tvPlayCount = (TextView) view.findViewById(R.id.tv_grid_playcount);
@@ -3713,32 +3807,48 @@ public class MainActivity extends Activity {
             ivCover.setImageResource(R.drawable.ic_launcher);
             if (item.coverArt != null && item.coverArt.length() > 0) {
                 final String coverUrl = item.coverArt;
-                final ImageView finalIv = ivCover;
+                ivCover.setTag(coverUrl);
+
                 Bitmap cached = imageMemoryCache != null ? imageMemoryCache.get(coverUrl) : null;
                 if (cached != null) {
-                    finalIv.setImageBitmap(cached);
+                    ivCover.setImageBitmap(cached);
                 } else {
-                    new Thread(new Runnable() {
+                    imageLoadExecutor.execute(new Runnable() {
                         @Override public void run() {
+                            HttpURLConnection c = null;
+                            InputStream is = null;
                             try {
                                 URL url = new URL(coverUrl);
-                                HttpURLConnection c = (HttpURLConnection) url.openConnection();
-                                c.setConnectTimeout(5000);
-                                c.setReadTimeout(5000);
+                                c = (HttpURLConnection) url.openConnection();
+                                c.setConnectTimeout(6000);
+                                c.setReadTimeout(6000);
+                                if (c instanceof HttpsURLConnection) {
+                                    ((HttpsURLConnection) c).setSSLSocketFactory(new TLSSocketFactory());
+                                }
                                 if (c.getResponseCode() == 200) {
-                                    final Bitmap b = BitmapFactory.decodeStream(c.getInputStream());
+                                    is = c.getInputStream();
+                                    final Bitmap b = BitmapFactory.decodeStream(is);
                                     if (b != null) {
                                         if (imageMemoryCache != null) imageMemoryCache.put(coverUrl, b);
                                         runOnUiThread(new Runnable() {
-                                            @Override public void run() { finalIv.setImageBitmap(b); }
+                                            @Override public void run() {
+                                                if (coverUrl.equals(ivCover.getTag())) {
+                                                    ivCover.setImageBitmap(b);
+                                                }
+                                            }
                                         });
                                     }
                                 }
-                                c.disconnect();
-                            } catch (Exception ignored) {}
+                            } catch (Exception ignored) {
+                            } finally {
+                                try { if (is != null) is.close(); } catch (Exception ignored) {}
+                                if (c != null) c.disconnect();
+                            }
                         }
-                    }).start();
+                    });
                 }
+            } else {
+                ivCover.setTag(null);
             }
             return view;
         }
