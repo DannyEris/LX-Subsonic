@@ -113,7 +113,7 @@ public class MainActivity extends Activity {
     private int currentPlazaRequestId = 0;
     private boolean isGridFlinging = false;
 
-    // 歌单广场数据备份栈与状态控制
+    // 歌单广场数据备份栈与快照
     private boolean isBrowsingPlazaSongs = false;
     private ArrayList<DisplayEntry> backupPlazaList = new ArrayList<DisplayEntry>();
     private ArrayList<Map<String, String>> backupPlazaData = new ArrayList<Map<String, String>>();
@@ -163,7 +163,7 @@ public class MainActivity extends Activity {
     private TextView tvCurrentSong, tvBottomBuffer, tvTime, tvDetailTitle, tvDetailArtist, tvDetailQuality, tvDetailBuffer, tvDetailTime, tvLyricOffsetStatus;
     private SeekBar seekBar, detailSeekBar;
     private Button btnBottomFav, btnDetailFav, btnToggleQueue, btnCloseQueue, btnCloseDetail, btnDetailDownload, btnDetailDlna, btnDetailKeepScreen, btnDetailQueue;
-    private Button btnLyricDelay, btnLyricReset, btnLyricAdvance, btnLyricDec, btnLyricInc;
+    private Button btnLyricDelay, btnLyricReset, btnLyricAdvance, btnLyricDec, btnLyricInc, btnSwitchLyric;
     private LinearLayout layoutBottomPlayer, layoutDetailOverlay, layoutQueuePanel, layoutCoverContainer, layoutDetailSeekBox, layoutDetailControls, layoutDetailBottomBlank;
     private LinearLayout layoutDetailLyricsView, layoutDetailQueueView, layoutLyricsContainer;
     private ListView lvQueue, lvDetailQueue;
@@ -506,20 +506,6 @@ public class MainActivity extends Activity {
         btnFavBack = (Button) findViewById(R.id.btn_fav_back);
         lvFavPlaylists = (ListView) findViewById(R.id.lv_fav_playlists);
 
-        if (btnFavRefresh == null && btnCreatePlaylist != null && btnCreatePlaylist.getParent() instanceof ViewGroup) {
-            ViewGroup parent = (ViewGroup) btnCreatePlaylist.getParent();
-            btnFavRefresh = new Button(this);
-            btnFavRefresh.setText("刷新");
-            btnFavRefresh.setTextSize(12);
-            btnFavRefresh.setTextColor(0xFFE0E0E0);
-            btnFavRefresh.setBackgroundResource(R.drawable.bg_btn_default);
-            float density = getResources().getDisplayMetrics().density;
-            btnFavRefresh.setPadding((int) (10 * density), 0, (int) (10 * density), 0);
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, (int) (32 * density));
-            lp.rightMargin = (int) (6 * density);
-            parent.addView(btnFavRefresh, 0, lp);
-        }
-
         favPlaylistsAdapter = new SimpleAdapter(this, favPlaylistsData, android.R.layout.simple_list_item_2,
                 new String[]{"title", "subtitle"}, new int[]{android.R.id.text1, android.R.id.text2});
         lvFavPlaylists.setAdapter(favPlaylistsAdapter);
@@ -606,6 +592,7 @@ public class MainActivity extends Activity {
         tvLyricOffsetStatus = (TextView) findViewById(R.id.tv_lyric_offset_status);
         btnLyricDec = (Button) findViewById(R.id.btn_lyric_dec);
         btnLyricInc = (Button) findViewById(R.id.btn_lyric_inc);
+        btnSwitchLyric = (Button) findViewById(R.id.btn_switch_lyric);
 
         queueAdapter = new SimpleAdapter(this, queueData, android.R.layout.simple_list_item_2,
                 new String[]{"title", "subtitle"}, new int[]{android.R.id.text1, android.R.id.text2});
@@ -615,7 +602,6 @@ public class MainActivity extends Activity {
         lvDetailQueue.setAdapter(detailQueueAdapter);
     }
 
-    // 彻底解耦视图模式：如果是歌曲列表则强制列表呈现，歌单广场则严格遵循用户选择
     private void updatePlazaViewModeState() {
         if (isBrowsingPlazaSongs) {
             gvPlazaPlaylists.setVisibility(View.GONE);
@@ -700,7 +686,7 @@ public class MainActivity extends Activity {
             loadLeaderboardBoards();
         } else if (page == PAGE_FAV) {
             showFavAndCustomPlaylists();
-            syncFavoritesAndPlaylists(false); // 切页无感后台校验保新
+            syncFavoritesAndPlaylists(false);
         } else if (page == PAGE_LOCAL) {
             scanLocalMusicFiles();
         } else if (page == PAGE_SETTINGS) {
@@ -741,8 +727,6 @@ public class MainActivity extends Activity {
                     if (!sName.equals(currentPlazaSort)) {
                         currentPlazaSort = sName;
                         setupPlazaSortButtons();
-                        
-                        // 关键优化：强制解除锁定状态，点击排序即刻加载
                         isLoadingPlaza = false;
                         loadPlazaSonglists(true);
                     }
@@ -1000,7 +984,6 @@ public class MainActivity extends Activity {
 
         final String snapshotKey = code + "_" + tagId + "_" + currentPlazaSort;
 
-        // 如果不是刷新且有快照缓存，瞬间展现
         if (!isRefresh && currentPlazaPage == 1 && PLAZA_SNAPSHOT_CACHE.containsKey(snapshotKey)) {
             ArrayList<DisplayEntry> cachedSnapshot = PLAZA_SNAPSHOT_CACHE.get(snapshotKey);
             if (cachedSnapshot != null && !cachedSnapshot.isEmpty()) {
@@ -1236,6 +1219,7 @@ public class MainActivity extends Activity {
                                 currentPlazaTagName = "";
                                 btnPlazaCategory.setText("全部分类 ▾");
                                 dialog.dismiss();
+                                isLoadingPlaza = false;
                                 loadPlazaSonglists(true);
                             }
                         });
@@ -1280,8 +1264,6 @@ public class MainActivity extends Activity {
                                         currentPlazaTagName = tag.name;
                                         btnPlazaCategory.setText(tag.name + " ▾");
                                         dialog.dismiss();
-                                        
-                                        // 关键优化：强制解除锁定状态，选择分类后立刻加载
                                         isLoadingPlaza = false;
                                         loadPlazaSonglists(true);
                                     }
@@ -1336,7 +1318,6 @@ public class MainActivity extends Activity {
                 .show();
     }
 
-    // 核心修复点 1：进入歌单曲目列表前深拷贝备份数据，并隐藏模式切换按钮
     private void openSonglistDetails(final DisplayEntry playlistEntry) {
         if (!isBrowsingPlazaSongs) {
             backupPlazaList.clear();
@@ -1348,7 +1329,7 @@ public class MainActivity extends Activity {
 
         isBrowsingPlazaSongs = true;
         btnPlazaBack.setVisibility(View.VISIBLE);
-        updatePlazaViewModeState(); // 自动隐藏模式切换按钮并强制列表显示
+        updatePlazaViewModeState();
 
         tvPlazaCurrentTag.setText("歌单: " + playlistEntry.title);
         plazaPlaylistsList.clear();
@@ -1383,7 +1364,6 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    // 核心修复点 1：安全退出歌曲列表，瞬间恢复广场快照，绝无网络多余请求与错乱
     private void exitPlazaSongsToPlaylists() {
         isBrowsingPlazaSongs = false;
         btnPlazaBack.setVisibility(View.GONE);
@@ -1394,7 +1374,7 @@ public class MainActivity extends Activity {
         plazaPlaylistsData.addAll(backupPlazaData);
 
         tvPlazaCurrentTag.setText(backupPlazaTitle);
-        updatePlazaViewModeState(); // 恢复用户偏好的网格/列表
+        updatePlazaViewModeState();
 
         plazaPlaylistsAdapter.notifyDataSetChanged();
         plazaGridAdapter.notifyDataSetChanged();
@@ -1511,7 +1491,6 @@ public class MainActivity extends Activity {
         favPlaylistsAdapter.notifyDataSetChanged();
     }
 
-    // 核心修复点 4：协调链式同步机制，彻底解决需要多次点击刷新才更新的问题
     private void syncFavoritesAndPlaylists(final boolean showToast) {
         if (showToast) Toast.makeText(this, "正在同步云端收藏与歌单...", Toast.LENGTH_SHORT).show();
         final String currentUser = prefs.getString("user", "admin").trim();
@@ -1519,7 +1498,6 @@ public class MainActivity extends Activity {
         new Thread(new Runnable() {
             @Override
             public void run() {
-                // 1. 同步喜欢歌曲 ID
                 final Set<String> updatedFavIds = new HashSet<String>();
                 String starredJson = requestApi("getStarred2.view?" + getAuthParams());
                 if (starredJson == null || !starredJson.contains("\"song\"")) {
@@ -1542,7 +1520,6 @@ public class MainActivity extends Activity {
                     } catch (Exception ignored) {}
                 }
 
-                // 2. 同步自建歌单列表
                 final ArrayList<DisplayEntry> updatedPlaylists = new ArrayList<DisplayEntry>();
                 String plJson = requestApi("getPlaylists.view?" + getAuthParams());
                 if (plJson != null) {
@@ -1561,7 +1538,6 @@ public class MainActivity extends Activity {
                     } catch (Exception ignored) {}
                 }
 
-                // 3. 在主线程原子性提交并刷新 UI，一次搞定
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
@@ -1887,9 +1863,7 @@ public class MainActivity extends Activity {
                 currentPlazaTagName = "";
                 btnPlazaCategory.setText("全部分类 ▾");
                 setupPlazaSortButtons();
-                
-                // 关键优化：强制解除锁定状态，确保切平台秒加载
-                isLoadingPlaza = false;
+                isLoadingPlaza = false; // 解除限制，切平台即刻加载
                 loadPlazaSonglists(true);
             }
             @Override public void onNothingSelected(AdapterView<?> parent) {}
@@ -1974,7 +1948,6 @@ public class MainActivity extends Activity {
             @Override public void onClick(View v) { showCategoryDialog(); }
         });
 
-        // 仅在歌单广场封面界面切换模式，且即刻持久化
         btnPlazaViewMode.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 isPlazaGridMode = !isPlazaGridMode;
@@ -1996,7 +1969,6 @@ public class MainActivity extends Activity {
             @Override public void onClick(View v) { promptImportPlaylist(); }
         });
 
-        // 返回按钮修复：直接调用快照还原，恢复原本的模式并消除混乱
         btnPlazaBack.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 exitPlazaSongsToPlaylists();
@@ -2124,7 +2096,6 @@ public class MainActivity extends Activity {
             }
         });
 
-        // 绑定收藏界面的真实同步刷新监听
         if (btnFavRefresh != null) {
             btnFavRefresh.setOnClickListener(new View.OnClickListener() {
                 @Override
@@ -2263,6 +2234,15 @@ public class MainActivity extends Activity {
         };
         btnBottomFav.setOnClickListener(favClickListener);
         btnDetailFav.setOnClickListener(favClickListener);
+
+        if (btnSwitchLyric != null) {
+            btnSwitchLyric.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    showLyricPickerDialog();
+                }
+            });
+        }
 
         if (btnDetailDlna != null) {
             btnDetailDlna.setOnClickListener(new View.OnClickListener() {
@@ -2521,6 +2501,111 @@ public class MainActivity extends Activity {
         });
     }
 
+    // 核心新增：跨平台歌词候选与手动匹配选择弹窗
+    private void showLyricPickerDialog() {
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        View view = LayoutInflater.from(this).inflate(R.layout.dialog_lyric_picker, null);
+        dialog.setContentView(view);
+
+        final EditText etQuery = (EditText) view.findViewById(R.id.et_lyric_search_query);
+        Button btnSubmit = (Button) view.findViewById(R.id.btn_lyric_search_submit);
+        Button btnClose = (Button) view.findViewById(R.id.btn_lyric_picker_close);
+        final ListView lvCandidates = (ListView) view.findViewById(R.id.lv_lyric_candidates);
+
+        String initial = (currentTitleForLyric != null ? currentTitleForLyric : "") + " " + (currentArtistForLyric != null ? currentArtistForLyric : "");
+        etQuery.setText(initial.trim());
+
+        final ArrayList<LxApiHelper.LyricCandidate> candidateList = new ArrayList<LxApiHelper.LyricCandidate>();
+        final ArrayList<String> displayList = new ArrayList<String>();
+        final ArrayAdapter<String> adapter = new ArrayAdapter<String>(this, android.R.layout.simple_list_item_1, displayList);
+        lvCandidates.setAdapter(adapter);
+
+        final Runnable searchRunnable = new Runnable() {
+            @Override
+            public void run() {
+                final String q = etQuery.getText().toString().trim();
+                if (q.length() == 0) return;
+                displayList.clear();
+                displayList.add("正在检索网易云/酷狗歌词库...");
+                adapter.notifyDataSetChanged();
+
+                new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        final ArrayList<LxApiHelper.LyricCandidate> res = LxApiHelper.searchLyricCandidates(q);
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                candidateList.clear();
+                                displayList.clear();
+                                if (res != null && !res.isEmpty()) {
+                                    candidateList.addAll(res);
+                                    for (LxApiHelper.LyricCandidate c : res) {
+                                        displayList.add(c.toString());
+                                    }
+                                } else {
+                                    displayList.add("未找到相关歌词，请微调歌名或歌手重试");
+                                }
+                                adapter.notifyDataSetChanged();
+                            }
+                        });
+                    }
+                }).start();
+            }
+        };
+
+        btnSubmit.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { searchRunnable.run(); }
+        });
+
+        btnClose.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { dialog.dismiss(); }
+        });
+
+        lvCandidates.setOnItemClickListener(new AdapterView.OnItemClickListener() {
+            @Override
+            public void onItemClick(AdapterView<?> parent, View v, int position, long id) {
+                if (position >= 0 && position < candidateList.size()) {
+                    final LxApiHelper.LyricCandidate chosen = candidateList.get(position);
+                    Toast.makeText(MainActivity.this, "正在应用歌词: " + chosen.title, Toast.LENGTH_SHORT).show();
+                    new Thread(new Runnable() {
+                        @Override
+                        public void run() {
+                            final String lrc = LxApiHelper.fetchLyricFromCandidate(chosen);
+                            runOnUiThread(new Runnable() {
+                                @Override
+                                public void run() {
+                                    if (lrc != null && lrc.trim().length() > 0) {
+                                        currentLoadedRawLyrics = lrc;
+                                        if (currentSongIdForLyric != null) {
+                                            prefs.edit().putString("custom_lyric_" + currentSongIdForLyric, lrc).apply();
+                                        }
+                                        buildLyricsView(lrc);
+                                        int curPos = detailSeekBar != null ? detailSeekBar.getProgress() : 0;
+                                        updateLyricPosition(curPos);
+                                        Toast.makeText(MainActivity.this, "歌词已切换并保存映射", Toast.LENGTH_SHORT).show();
+                                        dialog.dismiss();
+                                    } else {
+                                        Toast.makeText(MainActivity.this, "该候选暂无歌词内容", Toast.LENGTH_SHORT).show();
+                                    }
+                                }
+                            });
+                        }
+                    }).start();
+                }
+            }
+        });
+
+        float density = getResources().getDisplayMetrics().density;
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            dialog.getWindow().setLayout((int) (520 * density), ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+        dialog.show();
+        searchRunnable.run();
+    }
+
     private void startDlnaCast(DlnaManager.Device targetDev) {
         ArrayList<MusicService.SongItem> queue = MusicService.getPlaylist();
         int curIdx = MusicService.getCurrentIndex();
@@ -2558,11 +2643,27 @@ public class MainActivity extends Activity {
         loadingTv.setGravity(Gravity.CENTER);
         layoutLyricsContainer.addView(loadingTv);
 
+        // 1. 优先读取用户手动绑定的精准自定义歌词
+        String customLrc = prefs.getString("custom_lyric_" + songId, null);
+        if (customLrc != null && customLrc.trim().length() > 0) {
+            currentLoadedRawLyrics = customLrc;
+            buildLyricsView(customLrc);
+            return;
+        }
+
         new Thread(new Runnable() {
             @Override
             public void run() {
                 String lyricsText = null;
-                if (songId != null && songId.length() > 0) {
+
+                // 2. 如果是酷狗歌曲，优先调用酷狗专有 hash KRC/LRC 解析接口
+                if (songId != null && songId.startsWith("kg_")) {
+                    String hash = songId.substring(3);
+                    lyricsText = LxApiHelper.fetchKugouLyricByHash(hash);
+                }
+
+                // 3. Subsonic 服务端原生歌词拉取
+                if (lyricsText == null && songId != null && songId.length() > 0) {
                     try {
                         String res = requestApi("getLyricsBySongId.view?id=" + URLEncoder.encode(songId, "UTF-8") + "&" + getAuthParams());
                         lyricsText = parseLyricsFromJson(res);
@@ -2585,6 +2686,14 @@ public class MainActivity extends Activity {
                             String res = requestApi("getLyrics.view?" + p + "&" + getAuthParams());
                             lyricsText = parseLyricsFromJson(res);
                         } catch (Throwable ignored) {}
+                    }
+                }
+
+                // 4. 网易云等第三方多源静默兜底
+                if (lyricsText == null && title != null) {
+                    ArrayList<LxApiHelper.LyricCandidate> candidates = LxApiHelper.searchLyricCandidates(title + " " + (artist != null ? artist : ""));
+                    if (!candidates.isEmpty()) {
+                        lyricsText = LxApiHelper.fetchLyricFromCandidate(candidates.get(0));
                     }
                 }
 
@@ -2682,60 +2791,11 @@ public class MainActivity extends Activity {
         btnRetryOnline.setLayoutParams(lp);
         btnRetryOnline.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
-                fetchOnlineThirdPartyLyrics(currentTitleForLyric, currentArtistForLyric);
+                showLyricPickerDialog();
             }
         });
         box.addView(btnRetryOnline);
         layoutLyricsContainer.addView(box);
-    }
-
-    private void fetchOnlineThirdPartyLyrics(final String songTitle, final String artistName) {
-        layoutLyricsContainer.removeAllViews();
-        TextView loadingTv = new TextView(this);
-        loadingTv.setText("正在在线检索歌词...");
-        loadingTv.setTextColor(0xFF00E5FF);
-        layoutLyricsContainer.addView(loadingTv);
-
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                String fetchedLrc = null;
-                try {
-                    String query = (songTitle != null ? songTitle : "") + " " + (artistName != null ? artistName : "");
-                    query = query.replaceAll("\\([^)]*\\)", "").replaceAll("\\[[^\\]]*\\]", "").trim();
-                    String searchUrl = "https://music.163.com/api/search/get/web?s=" + URLEncoder.encode(query, "UTF-8") + "&type=1&offset=0&total=true&limit=1";
-                    String searchRes = LxApiHelper.httpGet(searchUrl);
-                    if (searchRes != null && searchRes.contains("\"songs\"")) {
-                        JSONArray songsArr = new JSONObject(searchRes).getJSONObject("result").getJSONArray("songs");
-                        if (songsArr.length() > 0) {
-                            long neteaseSongId = songsArr.getJSONObject(0).getLong("id");
-                            String lrcUrl = "https://music.163.com/api/song/lyric?os=pc&id=" + neteaseSongId + "&lv=-1&kv=-1&tv=-1";
-                            String lrcRes = LxApiHelper.httpGet(lrcUrl);
-                            if (lrcRes != null && lrcRes.contains("\"lrc\"")) {
-                                String candidate = new JSONObject(lrcRes).getJSONObject("lrc").getString("lyric");
-                                if (isValidLyrics(candidate)) fetchedLrc = candidate;
-                            }
-                        }
-                    }
-                } catch (Throwable ignored) {}
-
-                final String finalLrc = fetchedLrc;
-                runOnUiThread(new Runnable() {
-                    @Override
-                    public void run() {
-                        if (finalLrc != null) {
-                            currentLoadedRawLyrics = finalLrc;
-                            buildLyricsView(finalLrc);
-                            int curPos = detailSeekBar != null ? detailSeekBar.getProgress() : 0;
-                            updateLyricPosition(curPos);
-                            Toast.makeText(MainActivity.this, "在线歌词匹配成功", Toast.LENGTH_SHORT).show();
-                        } else {
-                            showSimpleLyric("未能匹配到在线歌词");
-                        }
-                    }
-                });
-            }
-        }).start();
     }
 
     private void buildLyricsView(String rawText) {
@@ -2897,6 +2957,11 @@ public class MainActivity extends Activity {
                     HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                     conn.setConnectTimeout(6000);
                     conn.setReadTimeout(6000);
+                    // 补齐酷狗防盗链头
+                    if (urlStr.contains("kugou.com")) {
+                        conn.setRequestProperty("Referer", "http://www.kugou.com/");
+                        conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
+                    }
                     if (conn instanceof HttpsURLConnection) {
                         ((HttpsURLConnection) conn).setSSLSocketFactory(new TLSSocketFactory());
                     }
@@ -3531,7 +3596,6 @@ public class MainActivity extends Activity {
         if (btnDetailFav != null) btnDetailFav.setText(symbol);
     }
 
-    // 收藏操作 0ms 本地即时响应，后台静默通知服务端
     private void serverStarSong(final String songId, final boolean toStar) {
         if (songId == null) return;
         if (toStar) {
@@ -3544,7 +3608,6 @@ public class MainActivity extends Activity {
         saveFavSet();
         updateFavButtonState(songId);
 
-        // 如果当前正在“我的收藏与歌单”总览页，即刻本地更新数量
         if (currentPage == PAGE_FAV && currentActiveFavPlaylistId == null && !favPlaylistsList.isEmpty()) {
             favPlaylistsList.get(0).subtitle = "共 " + favSongIds.size() + " 首";
             if (!favPlaylistsData.isEmpty()) {
@@ -3954,7 +4017,6 @@ public class MainActivity extends Activity {
         try { unregisterReceiver(statusReceiver); } catch (Exception ignored) {}
     }
 
-    // 关键修复点 1：物理返回键严格按照栈层级回退，杜绝误退桌面
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if (keyCode == KeyEvent.KEYCODE_BACK) {
@@ -3984,9 +4046,6 @@ public class MainActivity extends Activity {
         return super.onKeyDown(keyCode, event);
     }
 
-    // =========================================================================
-    // 磁盘持久缓存与下采样解码模块
-    // =========================================================================
     private static File getCoverDiskCacheDir(Context context) {
         File baseDir = context.getExternalCacheDir();
         if (baseDir == null || !baseDir.exists()) baseDir = context.getCacheDir();
@@ -4051,6 +4110,11 @@ public class MainActivity extends Activity {
             conn = (HttpURLConnection) url.openConnection();
             conn.setConnectTimeout(6000);
             conn.setReadTimeout(6000);
+            // 补齐酷狗防盗链头
+            if (urlString.contains("kugou.com")) {
+                conn.setRequestProperty("Referer", "http://www.kugou.com/");
+                conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
+            }
             if (conn instanceof HttpsURLConnection) {
                 ((HttpsURLConnection) conn).setSSLSocketFactory(new TLSSocketFactory());
             }
