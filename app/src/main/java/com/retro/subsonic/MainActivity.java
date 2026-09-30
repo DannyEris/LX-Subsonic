@@ -741,7 +741,10 @@ public class MainActivity extends Activity {
                     if (!sName.equals(currentPlazaSort)) {
                         currentPlazaSort = sName;
                         setupPlazaSortButtons();
-                        loadPlazaSonglists(false);
+                        
+                        // 关键优化：强制解除锁定状态，点击排序即刻加载
+                        isLoadingPlaza = false;
+                        loadPlazaSonglists(true);
                     }
                 }
             });
@@ -1277,6 +1280,9 @@ public class MainActivity extends Activity {
                                         currentPlazaTagName = tag.name;
                                         btnPlazaCategory.setText(tag.name + " ▾");
                                         dialog.dismiss();
+                                        
+                                        // 关键优化：强制解除锁定状态，选择分类后立刻加载
+                                        isLoadingPlaza = false;
                                         loadPlazaSonglists(true);
                                     }
                                 });
@@ -1876,11 +1882,15 @@ public class MainActivity extends Activity {
         spinnerPlazaPlatform.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
             public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                if (isSpinnersInitializing) return;
                 currentPlazaTagId = "";
                 currentPlazaTagName = "";
                 btnPlazaCategory.setText("全部分类 ▾");
                 setupPlazaSortButtons();
-                loadPlazaSonglists(false);
+                
+                // 关键优化：强制解除锁定状态，确保切平台秒加载
+                isLoadingPlaza = false;
+                loadPlazaSonglists(true);
             }
             @Override public void onNothingSelected(AdapterView<?> parent) {}
         });
