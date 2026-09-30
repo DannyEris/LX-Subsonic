@@ -55,7 +55,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="38dp"
                     android:background="@drawable/bg_btn_default"
-                    android:text="🔍 搜索"
+                    android:text="搜索"
                     android:textColor="#00e5ff"
                     android:textSize="13sp"
                     android:layout_marginBottom="6dp" />
@@ -65,7 +65,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="38dp"
                     android:background="@drawable/bg_btn_default"
-                    android:text="📑 歌单"
+                    android:text="歌单"
                     android:textColor="#a0a5b5"
                     android:textSize="13sp"
                     android:layout_marginBottom="6dp" />
@@ -75,7 +75,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="38dp"
                     android:background="@drawable/bg_btn_default"
-                    android:text="📊 排行榜"
+                    android:text="排行榜"
                     android:textColor="#a0a5b5"
                     android:textSize="13sp"
                     android:layout_marginBottom="6dp" />
@@ -85,7 +85,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="38dp"
                     android:background="@drawable/bg_btn_default"
-                    android:text="⭐ 我的收藏"
+                    android:text="我的收藏"
                     android:textColor="#a0a5b5"
                     android:textSize="13sp"
                     android:layout_marginBottom="6dp" />
@@ -95,7 +95,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="38dp"
                     android:background="@drawable/bg_btn_default"
-                    android:text="📁 本地音乐"
+                    android:text="本地音乐"
                     android:textColor="#a0a5b5"
                     android:textSize="13sp"
                     android:layout_marginBottom="6dp" />
@@ -105,7 +105,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="38dp"
                     android:background="@drawable/bg_btn_default"
-                    android:text="⚙ 设置"
+                    android:text="设置"
                     android:textColor="#a0a5b5"
                     android:textSize="13sp"
                     android:layout_marginBottom="6dp" />
@@ -210,7 +210,7 @@
                                 android:layout_height="wrap_content"
                                 android:layout_alignParentLeft="true"
                                 android:layout_centerVertical="true"
-                                android:text="🔥 平台热门搜索"
+                                android:text="平台热门搜索"
                                 android:textColor="#00e5ff"
                                 android:textSize="12sp"
                                 android:textStyle="bold" />
@@ -221,7 +221,7 @@
                                 android:layout_alignParentRight="true"
                                 android:layout_centerVertical="true"
                                 android:background="@drawable/bg_btn_default"
-                                android:text="收起 ▴"
+                                android:text="收起"
                                 android:textColor="#94a3b8"
                                 android:textSize="11sp"
                                 android:paddingLeft="8dp"
@@ -295,7 +295,7 @@
                     </LinearLayout>
                 </LinearLayout>
 
-                <!-- 2. 歌单广场页 (支持四方网格/列表切换、动态排序、分类选择) -->
+                <!-- 2. 歌单广场页 (支持四方网格/列表切换、多排序机制) -->
                 <LinearLayout
                     android:id="@+id/layout_page_plaza"
                     android:layout_width="match_parent"
@@ -303,7 +303,6 @@
                     android:orientation="vertical"
                     android:visibility="gone">
 
-                    <!-- 顶部筛选操作条 -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="38dp"
@@ -328,26 +327,27 @@
                             android:paddingLeft="8dp"
                             android:paddingRight="8dp"
                             android:layout_marginLeft="4dp" />
-                        <!-- 视图切换按键：网格 / 列表 -->
+                        <!-- 视图切换：网格 / 列表 -->
                         <Button
                             android:id="@+id/btn_plaza_view_mode"
                             android:layout_width="wrap_content"
                             android:layout_height="32dp"
                             android:background="@drawable/bg_btn_default"
-                            android:text="⊞ 网格"
+                            android:text="网格"
                             android:textColor="#00e5ff"
                             android:textSize="11sp"
                             android:paddingLeft="8dp"
                             android:paddingRight="8dp"
                             android:layout_marginLeft="4dp" />
+                        <!-- 刷新按钮：解决之前空白问题，明确显示汉字“刷新” -->
                         <Button
                             android:id="@+id/btn_plaza_refresh"
                             android:layout_width="wrap_content"
                             android:layout_height="32dp"
                             android:background="@drawable/bg_btn_default"
-                            android:text="🔄"
+                            android:text="刷新"
                             android:textColor="#e0e0e0"
-                            android:textSize="12sp"
+                            android:textSize="11sp"
                             android:paddingLeft="8dp"
                             android:paddingRight="8dp"
                             android:layout_marginLeft="4dp" />
@@ -386,7 +386,7 @@
                             android:layout_marginLeft="4dp" />
                     </LinearLayout>
 
-                    <!-- 二级排序栏 (如: 最热 / 最新 / 推荐 / 飙升) 与当前状态 -->
+                    <!-- 二级排序栏 (如: 最热 / 最新 / 推荐 / 飙升等) 与状态 -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="30dp"
@@ -402,7 +402,6 @@
                             android:textColor="#a0a5b5"
                             android:textSize="12sp"
                             android:singleLine="true" />
-                        <!-- 动态生成的排序按钮组容器 -->
                         <LinearLayout
                             android:id="@+id/layout_plaza_sort_container"
                             android:layout_width="wrap_content"
@@ -428,7 +427,7 @@
                         android:layout_height="0dp"
                         android:layout_weight="1"
                         android:layout_marginTop="4dp">
-                        <!-- 视图 1：四方网格视图 (横屏平板 4 列自适应) -->
+                        <!-- 视图 1：网格视图 -->
                         <GridView
                             android:id="@+id/gv_plaza_playlists"
                             android:layout_width="match_parent"
@@ -438,7 +437,7 @@
                             android:verticalSpacing="4dp"
                             android:stretchMode="columnWidth"
                             android:visibility="visible" />
-                        <!-- 视图 2：传统列表视图 -->
+                        <!-- 视图 2：列表视图 -->
                         <ListView
                             android:id="@+id/lv_plaza_playlists"
                             android:layout_width="match_parent"
@@ -492,9 +491,9 @@
                             android:layout_width="wrap_content"
                             android:layout_height="32dp"
                             android:background="@drawable/bg_btn_default"
-                            android:text="🔄 刷新榜单"
+                            android:text="刷新榜单"
                             android:textColor="#e0e0e0"
-                            android:textSize="12sp"
+                            android:textSize="11sp"
                             android:paddingLeft="10dp"
                             android:paddingRight="10dp" />
                     </LinearLayout>
