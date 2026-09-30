@@ -17,7 +17,6 @@ import javax.net.ssl.HttpsURLConnection;
 
 public class LxApiHelper {
 
-    // 歌单基本模型[cite: 1]
     public static class PlaylistInfo {
         public String id;
         public String name;
@@ -36,7 +35,6 @@ public class LxApiHelper {
         }
     }
 
-    // 动态分类标签模型 (精准对应各平台的 categoryId/tagId 与显示名称)[cite: 1]
     public static class CategoryTag {
         public String name;
         public String id;
@@ -47,7 +45,6 @@ public class LxApiHelper {
         }
     }
 
-    // 动态排行榜模型 (精准对应官方各榜单的真实 sourceid/topId)[cite: 1]
     public static class LeaderboardInfo {
         public String id;
         public String name;
@@ -66,7 +63,6 @@ public class LxApiHelper {
     public static final String[] PLAZA_PLATFORM_NAMES = new String[]{"QQ音乐", "网易云", "酷狗音乐", "酷我音乐", "咪咕音乐"};
     public static final String[] PLAZA_PLATFORM_CODES = new String[]{"tx", "wy", "kg", "kw", "mg"};
 
-    // 内存二级缓存：避免每次打开弹窗都重复网络请求，提升老旧 x86 设备的响应速度[cite: 1]
     private static final Map<String, Map<String, ArrayList<CategoryTag>>> CATEGORY_CACHE = new HashMap<String, Map<String, ArrayList<CategoryTag>>>();
     private static final Map<String, ArrayList<LeaderboardInfo>> LEADERBOARD_CACHE = new HashMap<String, ArrayList<LeaderboardInfo>>();
 
@@ -80,7 +76,6 @@ public class LxApiHelper {
         else LEADERBOARD_CACHE.remove(platform.toLowerCase());
     }
 
-    // 1. 各大平台实时热门搜索词抓取[cite: 1]
     public static ArrayList<String> fetchHotSearch(String platform) {
         ArrayList<String> list = new ArrayList<String>();
         try {
@@ -121,7 +116,6 @@ public class LxApiHelper {
                     }
                 }
             } else {
-                // QQ音乐官方实时热词[cite: 1]
                 String res = httpGet("https://c.y.qq.com/splcloud/fcgi-bin/gethotkey.fcg?g_tk=5381&format=json&inCharset=utf8&outCharset=utf-8&utf8=1");
                 if (res != null) {
                     JSONArray arr = new JSONObject(res).getJSONObject("data").getJSONArray("hotkey");
@@ -139,7 +133,6 @@ public class LxApiHelper {
         return list;
     }
 
-    // 2. 官方排序方式[cite: 1]
     public static String[] getPlatformSorts(String platformCode) {
         if ("kg".equals(platformCode)) {
             return new String[]{"推荐", "最热", "最新", "热藏", "飙升"};
@@ -152,7 +145,6 @@ public class LxApiHelper {
         }
     }
 
-    // 3. 全平台官方实时动态分类树拉取[cite: 1]
     public static Map<String, ArrayList<CategoryTag>> fetchDynamicCategories(String platform) {
         String key = platform.toLowerCase();
         if (CATEGORY_CACHE.containsKey(key)) {
@@ -298,7 +290,6 @@ public class LxApiHelper {
         return cat;
     }
 
-    // 4. 全平台官方实时动态排行榜大纲拉取[cite: 1]
     public static ArrayList<LeaderboardInfo> fetchDynamicLeaderboards(String platform) {
         String key = platform.toLowerCase();
         if (LEADERBOARD_CACHE.containsKey(key)) {
@@ -384,7 +375,6 @@ public class LxApiHelper {
         return list;
     }
 
-    // 5. 歌单广场歌单列表获取[cite: 1]
     public static ArrayList<PlaylistInfo> fetchPlaylists(String platform, String tagId, String tagName, String sort, int page) {
         ArrayList<PlaylistInfo> list = new ArrayList<PlaylistInfo>();
         try {
@@ -501,7 +491,6 @@ public class LxApiHelper {
         return fetchPlaylists(platform, tag, tag, sort, page);
     }
 
-    // 6. 搜索歌单[cite: 1]
     public static ArrayList<PlaylistInfo> searchPlaylists(String platform, String keyword, int page) {
         ArrayList<PlaylistInfo> list = new ArrayList<PlaylistInfo>();
         try {
@@ -574,9 +563,15 @@ public class LxApiHelper {
         return list;
     }
 
-    // 7. 歌单内歌曲抓取[cite: 1]
     public static ArrayList<MainActivity.DisplayEntry> fetchPlaylistSongs(String rawPlaylistId) {
+        return fetchPlaylistSongs(rawPlaylistId, "320K MP3");
+    }
+
+    public static ArrayList<MainActivity.DisplayEntry> fetchPlaylistSongs(String rawPlaylistId, String defaultQuality) {
         ArrayList<MainActivity.DisplayEntry> songs = new ArrayList<MainActivity.DisplayEntry>();
+        String qualityLabel = (defaultQuality != null && defaultQuality.length() > 0) ? defaultQuality : "320K MP3";
+        int bitRateNumeric = qualityLabel.contains("FLAC") ? 999 : (qualityLabel.contains("128") ? 128 : 320);
+
         try {
             if (rawPlaylistId.startsWith("wy_")) {
                 String id = rawPlaylistId.substring(3);
@@ -603,7 +598,7 @@ public class LxApiHelper {
                             String cover = null;
                             if (t.optJSONObject("al") != null) cover = t.optJSONObject("al").optString("picUrl", null);
                             else if (t.optJSONObject("album") != null) cover = t.optJSONObject("album").optString("picUrl", null);
-                            songs.add(new MainActivity.DisplayEntry(songId, title, artist, artist + " [320K MP3]", cover, "320K MP3", true, 320));
+                            songs.add(new MainActivity.DisplayEntry(songId, title, artist, artist + " [" + qualityLabel + "]", cover, qualityLabel, true, bitRateNumeric));
                         }
                     }
                 }
@@ -623,7 +618,7 @@ public class LxApiHelper {
                                 artist = p[0].trim(); title = p[1].trim();
                             }
                             String hash = o.optString("hash", "");
-                            songs.add(new MainActivity.DisplayEntry("kg_" + hash, title, artist, artist + " [320K MP3]", null, "320K MP3", true, 320));
+                            songs.add(new MainActivity.DisplayEntry("kg_" + hash, title, artist, artist + " [" + qualityLabel + "]", null, qualityLabel, true, bitRateNumeric));
                         }
                     }
                 }
@@ -642,7 +637,7 @@ public class LxApiHelper {
                             if (s.has("singer") && s.getJSONArray("singer").length() > 0) {
                                 artist = s.getJSONArray("singer").getJSONObject(0).getString("name");
                             }
-                            songs.add(new MainActivity.DisplayEntry("tx_" + songmid, title, artist, artist + " [320K MP3]", null, "320K MP3", true, 320));
+                            songs.add(new MainActivity.DisplayEntry("tx_" + songmid, title, artist, artist + " [" + qualityLabel + "]", null, qualityLabel, true, bitRateNumeric));
                         }
                     }
                 }
@@ -658,7 +653,7 @@ public class LxApiHelper {
                             String songId = o.getString("id");
                             String title = o.getString("name");
                             String artist = o.optString("artist", "酷我歌手");
-                            songs.add(new MainActivity.DisplayEntry("kw_" + songId, title, artist, artist + " [320K MP3]", null, "320K MP3", true, 320));
+                            songs.add(new MainActivity.DisplayEntry("kw_" + songId, title, artist, artist + " [" + qualityLabel + "]", null, qualityLabel, true, bitRateNumeric));
                         }
                     }
                 }
@@ -674,7 +669,7 @@ public class LxApiHelper {
                             String songId = o.optString("songId", "");
                             String title = o.optString("songName", "");
                             String artist = o.optString("singerName", "咪咕歌手");
-                            songs.add(new MainActivity.DisplayEntry("mg_" + songId, title, artist, artist + " [320K MP3]", null, "320K MP3", true, 320));
+                            songs.add(new MainActivity.DisplayEntry("mg_" + songId, title, artist, artist + " [" + qualityLabel + "]", null, qualityLabel, true, bitRateNumeric));
                         }
                     }
                 }
@@ -683,12 +678,18 @@ public class LxApiHelper {
         return songs;
     }
 
-    // 8. 排行榜歌曲列表获取[cite: 1]
     public static ArrayList<MainActivity.DisplayEntry> fetchLeaderboardSongs(String platform, String boardKey) {
+        return fetchLeaderboardSongs(platform, boardKey, "320K MP3");
+    }
+
+    public static ArrayList<MainActivity.DisplayEntry> fetchLeaderboardSongs(String platform, String boardKey, String defaultQuality) {
         ArrayList<MainActivity.DisplayEntry> songs = new ArrayList<MainActivity.DisplayEntry>();
+        String qualityLabel = (defaultQuality != null && defaultQuality.length() > 0) ? defaultQuality : "320K MP3";
+        int bitRateNumeric = qualityLabel.contains("FLAC") ? 999 : (qualityLabel.contains("128") ? 128 : 320);
+
         try {
             if ("wy".equalsIgnoreCase(platform)) {
-                return fetchPlaylistSongs("wy_" + boardKey);
+                return fetchPlaylistSongs("wy_" + boardKey, qualityLabel);
             } else if ("tx".equalsIgnoreCase(platform)) {
                 String reqJson = "{\"detail\":{\"module\":\"musicToplist.ToplistInfoServer\",\"method\":\"GetDetail\",\"param\":{\"topId\":" + boardKey + ",\"offset\":0,\"num\":100}}}";
                 String url = "https://u.y.qq.com/cgi-bin/musicu.fcg?format=json&inCharset=utf8&outCharset=utf-8&utf8=1&data=" + URLEncoder.encode(reqJson, "UTF-8");
@@ -704,7 +705,7 @@ public class LxApiHelper {
                         if (s.has("singer") && s.getJSONArray("singer").length() > 0) {
                             artist = s.getJSONArray("singer").getJSONObject(0).getString("name");
                         }
-                        songs.add(new MainActivity.DisplayEntry("tx_" + mid, title, artist, artist + " [320K MP3]", null, "320K MP3", true, 320));
+                        songs.add(new MainActivity.DisplayEntry("tx_" + mid, title, artist, artist + " [" + qualityLabel + "]", null, qualityLabel, true, bitRateNumeric));
                     }
                 }
             } else if ("kg".equalsIgnoreCase(platform)) {
@@ -723,7 +724,7 @@ public class LxApiHelper {
                                 artist = p[0].trim(); title = p[1].trim();
                             }
                             String hash = o.optString("hash", "");
-                            songs.add(new MainActivity.DisplayEntry("kg_" + hash, title, artist, artist + " [320K MP3]", null, "320K MP3", true, 320));
+                            songs.add(new MainActivity.DisplayEntry("kg_" + hash, title, artist, artist + " [" + qualityLabel + "]", null, qualityLabel, true, bitRateNumeric));
                         }
                     }
                 }
@@ -739,7 +740,7 @@ public class LxApiHelper {
                             String id = o.getString("id");
                             String title = o.getString("name");
                             String artist = o.optString("artist", "酷我歌手");
-                            songs.add(new MainActivity.DisplayEntry("kw_" + id, title, artist, artist + " [320K MP3]", null, "320K MP3", true, 320));
+                            songs.add(new MainActivity.DisplayEntry("kw_" + id, title, artist, artist + " [" + qualityLabel + "]", null, qualityLabel, true, bitRateNumeric));
                         }
                     }
                 }
@@ -756,7 +757,7 @@ public class LxApiHelper {
                                 String songId = o.optString("songId", o.optString("contentId", ""));
                                 String title = o.optString("songName", o.optString("contentName", ""));
                                 String artist = o.optString("singerName", "咪咕歌手");
-                                songs.add(new MainActivity.DisplayEntry("mg_" + songId, title, artist, artist + " [320K MP3]", null, "320K MP3", true, 320));
+                                songs.add(new MainActivity.DisplayEntry("mg_" + songId, title, artist, artist + " [" + qualityLabel + "]", null, qualityLabel, true, bitRateNumeric));
                             }
                         }
                     }
@@ -766,7 +767,6 @@ public class LxApiHelper {
         return songs;
     }
 
-    // 9. 智能防盗链网络通道 (带 301/302 跨协议重定向自动递归处理)
     public static String httpGet(String urlStr) {
         return httpGetWithRedirect(urlStr, 0);
     }
@@ -778,13 +778,12 @@ public class LxApiHelper {
             TLSSocketFactory.install();
             URL url = new URL(urlStr);
             conn = (HttpURLConnection) url.openConnection();
-            conn.setInstanceFollowRedirects(false); // 手工接管重定向，解决 Android 原生无法跨 HTTP/HTTPS 跳转的问题
+            conn.setInstanceFollowRedirects(false); // 手动接管 301/302，确保跨 HTTP/HTTPS 跳转正确追踪
             conn.setRequestMethod("GET");
             conn.setConnectTimeout(7000);
             conn.setReadTimeout(9000);
             conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36");
 
-            // 动态匹配各大音乐平台防盗链头[cite: 1]
             if (urlStr.contains("163.com")) {
                 conn.setRequestProperty("Referer", "https://music.163.com/");
             } else if (urlStr.contains("qq.com")) {
@@ -805,7 +804,6 @@ public class LxApiHelper {
 
             int code = conn.getResponseCode();
 
-            // 处理 301、302、303、307 重定向跳转
             if (code == 301 || code == 302 || code == 303 || code == 307) {
                 String location = conn.getHeaderField("Location");
                 conn.disconnect();
