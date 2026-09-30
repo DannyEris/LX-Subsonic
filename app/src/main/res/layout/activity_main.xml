@@ -916,15 +916,34 @@
                 android:orientation="vertical"
                 android:paddingLeft="8dp"
                 android:paddingRight="8dp">
-                <TextView
-                    android:id="@+id/tv_current_song"
+                
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="未在播放"
-                    android:textColor="#ffffff"
-                    android:textSize="14sp"
-                    android:textStyle="bold"
-                    android:singleLine="true" />
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+                    
+                    <TextView
+                        android:id="@+id/tv_current_song"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="未在播放"
+                        android:textColor="#ffffff"
+                        android:textSize="14sp"
+                        android:textStyle="bold"
+                        android:singleLine="true" />
+                        
+                    <TextView
+                        android:id="@+id/tv_bottom_buffer"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textColor="#ffb300"
+                        android:textSize="11sp"
+                        android:layout_marginLeft="6dp"
+                        android:visibility="gone" />
+                </LinearLayout>
+
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
