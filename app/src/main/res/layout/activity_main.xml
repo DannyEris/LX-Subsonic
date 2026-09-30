@@ -633,7 +633,7 @@
                         android:layout_marginTop="4dp" />
                 </LinearLayout>
 
-                <!-- 6. 设置页 -->
+                <!-- 6. 设置页 (ScrollView 内部严格保留单一根卡片 LinearLayout) -->
                 <ScrollView
                     android:id="@+id/layout_page_settings"
                     android:layout_width="match_parent"
@@ -641,28 +641,6 @@
                     android:fillViewport="true"
                     android:visibility="gone">
 
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical"
-                        android:layout_marginTop="8dp">
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="歌单广场默认音质:"
-                            android:textColor="#cccccc"
-                            android:textSize="13sp" />
-                        <Spinner
-                            android:id="@+id/spinner_plaza_bitrate"
-                            android:layout_width="wrap_content"
-                            android:layout_height="32dp"
-                            android:background="@drawable/bg_btn_pill"
-                            android:paddingLeft="10dp"
-                            android:paddingRight="10dp"
-                            android:layout_marginLeft="10dp"
-                            android:spinnerMode="dropdown" />
-                    </LinearLayout>
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -788,6 +766,30 @@
                                 android:textSize="13sp" />
                             <Spinner
                                 android:id="@+id/spinner_config_bitrate"
+                                android:layout_width="wrap_content"
+                                android:layout_height="32dp"
+                                android:background="@drawable/bg_btn_pill"
+                                android:paddingLeft="10dp"
+                                android:paddingRight="10dp"
+                                android:layout_marginLeft="10dp"
+                                android:spinnerMode="dropdown" />
+                        </LinearLayout>
+
+                        <!-- 关键修正点：正确置于主卡片内部，绝不在 ScrollView 下产生多余直接子项 -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:layout_marginTop="8dp">
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="歌单广场默认音质:"
+                                android:textColor="#cccccc"
+                                android:textSize="13sp" />
+                            <Spinner
+                                android:id="@+id/spinner_plaza_bitrate"
                                 android:layout_width="wrap_content"
                                 android:layout_height="32dp"
                                 android:background="@drawable/bg_btn_pill"
@@ -938,13 +940,13 @@
                 android:orientation="vertical"
                 android:paddingLeft="8dp"
                 android:paddingRight="8dp">
-                
+
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
                     android:gravity="center_vertical">
-                    
+
                     <TextView
                         android:id="@+id/tv_current_song"
                         android:layout_width="0dp"
@@ -955,7 +957,8 @@
                         android:textSize="14sp"
                         android:textStyle="bold"
                         android:singleLine="true" />
-                        
+
+                    <!-- 底部缓冲百分比指示器 -->
                     <TextView
                         android:id="@+id/tv_bottom_buffer"
                         android:layout_width="wrap_content"
@@ -1312,6 +1315,7 @@
                         android:background="#16181d"
                         android:paddingLeft="10dp"
                         android:paddingRight="10dp" />
+                    <!-- 详情页缓冲百分比指示器 -->
                     <TextView
                         android:id="@+id/tv_detail_buffer"
                         android:layout_width="wrap_content"
