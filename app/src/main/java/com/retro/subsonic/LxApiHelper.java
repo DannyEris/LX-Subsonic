@@ -103,16 +103,15 @@ public class LxApiHelper {
         if ("kg".equals(platformCode)) {
             return new String[]{"推荐", "最热", "最新", "热藏", "飙升"};
         } else if ("kw".equals(platformCode)) {
-            return new String[]{"最新", "最热"};
+            return new String[]{"最热", "最新"};
         } else if ("mg".equals(platformCode)) {
-            return new String[]{"推荐", "最热", "最新"};
+            return new String[]{"最热", "最新", "推荐"};
         } else {
-            // 网易云与QQ音乐
             return new String[]{"最热", "最新"};
         }
     }
 
-    // 3. 对齐各大平台官网的结构化分类目录树
+    // 3. 对齐各大平台官网与截图展示的完整分类目录树
     public static Map<String, String[]> getPresetCategories(String platformCode) {
         Map<String, String[]> cat = new LinkedHashMap<String, String[]>();
         if ("wy".equals(platformCode)) {
@@ -145,7 +144,6 @@ public class LxApiHelper {
             cat.put("曲风流派", new String[]{"流行", "DJ", "古风", "佛乐", "轻音乐", "纯音乐", "电子", "喊麦", "3D", "器乐", "摇滚", "民歌", "民谣", "古典", "嘻哈", "乡村", "爵士", "R&B"});
             cat.put("语言", new String[]{"华语", "欧美", "日韩", "粤语"});
         } else {
-            // 咪咕音乐
             cat.put("风格", new String[]{"流行", "电子", "国风", "爵士", "乡村", "蓝调", "民谣", "纯音乐", "古典", "摇滚", "嘻哈", "R&B"});
             cat.put("语种", new String[]{"国语", "粤语", "英语", "日语", "韩语", "小语种"});
             cat.put("场景", new String[]{"运动", "瑜伽", "学习", "睡前安眠", "驾车", "旅行", "夜店", "派对", "下午茶", "读书"});
@@ -171,7 +169,26 @@ public class LxApiHelper {
         put("国语", 165); put("粤语", 167); put("英语", 169); put("韩语", 170); put("日语", 171); put("闽南语", 172); put("法语", 176); put("拉丁语", 177);
     }};
 
-    // 4. 歌单广场获取（支持自定义平台、分类、排序和分页）
+    // 酷我音乐官方分类名称与 TagId 映射（校准对接关键：确保选择分类不再落空）
+    private static final Map<String, Integer> KW_TAG_MAP = new HashMap<String, Integer>() {{
+        put("经典老歌专区", 182); put("网红专区", 181); put("DJ专区", 180); put("轻音乐专区", 179);
+        put("国风专区", 178); put("影视专区", 177); put("铃声专区", 176); put("动漫专区", 175);
+        put("新歌首发专区", 174); put("K歌专区", 173); put("小说专区", 172); put("佛乐专区", 171);
+        put("儿童专区", 170); put("评书专区", 169); put("综艺专区", 168); put("古典专区", 167);
+        put("Vlog音乐", 186); put("短视频", 184); put("经典", 39); put("情歌", 40); put("BGM", 183);
+        put("演唱会", 41); put("游戏", 42); put("怀旧", 43); put("合唱", 44); put("网络", 45);
+        put("儿童", 46); put("ACG", 47); put("影视", 48); put("网红", 49); put("伤感", 51);
+        put("解压", 52); put("励志", 53); put("开心", 54); put("甜蜜", 55); put("兴奋", 56);
+        put("安静", 57); put("思念", 58); put("开车", 60); put("运动", 61); put("睡眠", 62);
+        put("跳舞", 63); put("学习", 64); put("清晨", 65); put("KTV", 66); put("校园", 67);
+        put("旅行", 68); put("工作", 69); put("广场舞", 70); put("通勤", 71); put("70后", 73);
+        put("80后", 74); put("90后", 75); put("00后", 76); put("流行", 11); put("DJ", 12);
+        put("古风", 13); put("佛乐", 14); put("轻音乐", 15); put("纯音乐", 16); put("电子", 17);
+        put("摇滚", 20); put("民谣", 22); put("古典", 23); put("华语", 1); put("欧美", 2);
+        put("日韩", 3); put("粤语", 4);
+    }};
+
+    // 4. 歌单广场获取（多平台精准校准接口）
     public static ArrayList<PlaylistInfo> fetchPlaylists(String platform, String tag, String sort, int page) {
         ArrayList<PlaylistInfo> list = new ArrayList<PlaylistInfo>();
         try {
@@ -182,12 +199,15 @@ public class LxApiHelper {
                 String url = "https://c.y.qq.com/splcloud/fcgi-bin/fcg_get_diss_by_tag.fcg?sin=" + ((page - 1) * 30) + "&ein=" + (page * 30 - 1) + "&categoryId=" + catId + "&sortId=" + sortId + "&format=json&inCharset=utf8&outCharset=utf-8&utf8=1";
                 String res = httpGet(url);
                 if (res != null) {
-                    JSONArray arr = new JSONObject(res).getJSONObject("data").getJSONArray("list");
-                    for (int i = 0; i < arr.length(); i++) {
-                        JSONObject o = arr.getJSONObject(i);
-                        list.add(new PlaylistInfo("tx_" + o.getString("dissid"), o.getString("dissname"),
-                                o.optJSONObject("creator") != null ? o.optJSONObject("creator").optString("name", "") : "QQ音乐",
-                                o.optString("imgurl", ""), String.valueOf(o.optLong("listennum", 0)), "tx"));
+                    JSONObject root = new JSONObject(res);
+                    if (root.has("data") && root.getJSONObject("data").has("list")) {
+                        JSONArray arr = root.getJSONObject("data").getJSONArray("list");
+                        for (int i = 0; i < arr.length(); i++) {
+                            JSONObject o = arr.getJSONObject(i);
+                            list.add(new PlaylistInfo("tx_" + o.getString("dissid"), o.getString("dissname"),
+                                    o.optJSONObject("creator") != null ? o.optJSONObject("creator").optString("name", "QQ音乐") : "QQ音乐",
+                                    o.optString("imgurl", ""), String.valueOf(o.optLong("listennum", 0)), "tx"));
+                        }
                     }
                 }
             } else if ("kg".equalsIgnoreCase(platform)) {
@@ -201,18 +221,26 @@ public class LxApiHelper {
                 String url = "http://mobilecdn.kugou.com/api/v3/tag/specialList?pagesize=30&page=" + page + "&sort=" + sortVal + tagParam;
                 String res = httpGet(url);
                 if (res != null) {
-                    JSONArray arr = new JSONObject(res).getJSONObject("data").getJSONArray("info");
-                    for (int i = 0; i < arr.length(); i++) {
-                        JSONObject o = arr.getJSONObject(i);
-                        list.add(new PlaylistInfo("kg_" + o.getString("specialid"), o.getString("specialname"),
-                                o.optString("nickname", "酷狗音乐"), o.optString("imgurl", "").replace("{size}", "400"),
-                                o.optString("playcount", ""), "kg"));
+                    JSONObject root = new JSONObject(res);
+                    if (root.has("data") && root.getJSONObject("data").has("info")) {
+                        JSONArray arr = root.getJSONObject("data").getJSONArray("info");
+                        for (int i = 0; i < arr.length(); i++) {
+                            JSONObject o = arr.getJSONObject(i);
+                            list.add(new PlaylistInfo("kg_" + o.getString("specialid"), o.getString("specialname"),
+                                    o.optString("nickname", "酷狗音乐"), o.optString("imgurl", "").replace("{size}", "400"),
+                                    o.optString("playcount", ""), "kg"));
+                        }
                     }
                 }
             } else if ("kw".equalsIgnoreCase(platform)) {
                 String orderVal = "最新".equals(sort) ? "new" : "hot";
-                String tagParam = (tag == null || tag.length() == 0 || "全部".equals(tag)) ? "" : ("&name=" + URLEncoder.encode(tag, "UTF-8"));
-                String url = "http://wapi.kuwo.cn/api/pc/classify/playlist/getRcmPlayList?pn=" + page + "&rn=30&order=" + orderVal + tagParam;
+                String url;
+                if (tag != null && KW_TAG_MAP.containsKey(tag)) {
+                    int tagId = KW_TAG_MAP.get(tag);
+                    url = "http://wapi.kuwo.cn/api/pc/classify/playlist/getTagPlayList?pn=" + page + "&rn=30&id=" + tagId + "&order=" + orderVal;
+                } else {
+                    url = "http://wapi.kuwo.cn/api/pc/classify/playlist/getRcmPlayList?pn=" + page + "&rn=30&order=" + orderVal;
+                }
                 String res = httpGet(url);
                 if (res != null) {
                     JSONObject root = new JSONObject(res);
@@ -254,12 +282,15 @@ public class LxApiHelper {
                 String url = "https://music.163.com/api/playlist/list?cat=" + encodedTag + "&order=" + orderVal + "&limit=30&offset=" + ((page - 1) * 30);
                 String res = httpGet(url);
                 if (res != null) {
-                    JSONArray arr = new JSONObject(res).getJSONArray("playlists");
-                    for (int i = 0; i < arr.length(); i++) {
-                        JSONObject o = arr.getJSONObject(i);
-                        list.add(new PlaylistInfo("wy_" + o.getLong("id"), o.getString("name"),
-                                o.optJSONObject("creator") != null ? o.optJSONObject("creator").optString("nickname", "") : "网易云",
-                                o.optString("coverImgUrl", ""), String.valueOf(o.optLong("playCount", 0)), "wy"));
+                    JSONObject root = new JSONObject(res);
+                    if (root.has("playlists")) {
+                        JSONArray arr = root.getJSONArray("playlists");
+                        for (int i = 0; i < arr.length(); i++) {
+                            JSONObject o = arr.getJSONObject(i);
+                            list.add(new PlaylistInfo("wy_" + o.getLong("id"), o.getString("name"),
+                                    o.optJSONObject("creator") != null ? o.optJSONObject("creator").optString("nickname", "网易云") : "网易云",
+                                    o.optString("coverImgUrl", ""), String.valueOf(o.optLong("playCount", 0)), "wy"));
+                        }
                     }
                 }
             }
@@ -280,7 +311,7 @@ public class LxApiHelper {
                     for (int i = 0; i < arr.length(); i++) {
                         JSONObject o = arr.getJSONObject(i);
                         list.add(new PlaylistInfo("tx_" + o.getString("dissid"), o.getString("dissname"),
-                                o.optJSONObject("creator") != null ? o.optJSONObject("creator").optString("name", "") : "QQ音乐",
+                                o.optJSONObject("creator") != null ? o.optJSONObject("creator").optString("name", "QQ音乐") : "QQ音乐",
                                 o.optString("imgurl", ""), String.valueOf(o.optLong("listennum", 0)), "tx"));
                     }
                 }
@@ -331,7 +362,7 @@ public class LxApiHelper {
                     for (int i = 0; i < arr.length(); i++) {
                         JSONObject o = arr.getJSONObject(i);
                         list.add(new PlaylistInfo("wy_" + o.getLong("id"), o.getString("name"),
-                                o.optJSONObject("creator") != null ? o.optJSONObject("creator").optString("nickname", "") : "网易云",
+                                o.optJSONObject("creator") != null ? o.optJSONObject("creator").optString("nickname", "网易云") : "网易云",
                                 o.optString("coverImgUrl", ""), String.valueOf(o.optLong("playCount", 0)), "wy"));
                     }
                 }
@@ -340,84 +371,109 @@ public class LxApiHelper {
         return list;
     }
 
-    // 6. 歌单内歌曲抓取
+    // 6. 歌单内歌曲抓取 (双重容错：支持 result 与 playlist 双返回键)
     public static ArrayList<MainActivity.DisplayEntry> fetchPlaylistSongs(String rawPlaylistId) {
         ArrayList<MainActivity.DisplayEntry> songs = new ArrayList<MainActivity.DisplayEntry>();
         try {
             if (rawPlaylistId.startsWith("wy_")) {
                 String id = rawPlaylistId.substring(3);
-                String res = httpGet("https://music.163.com/api/v6/playlist/detail?id=" + id);
+                // 优先 v1 API 兜底 v6 API，避免未登录抛出 400
+                String res = httpGet("https://music.163.com/api/playlist/detail?id=" + id);
+                if (res == null || !res.contains("\"tracks\"")) {
+                    res = httpGet("https://music.163.com/api/v6/playlist/detail?id=" + id);
+                }
                 if (res != null) {
-                    JSONArray tracks = new JSONObject(res).getJSONObject("playlist").getJSONArray("tracks");
-                    for (int i = 0; i < tracks.length(); i++) {
-                        JSONObject t = tracks.getJSONObject(i);
-                        String songId = "wy_" + t.getLong("id");
-                        String title = t.getString("name");
-                        String artist = "群星";
-                        if (t.has("ar") && t.getJSONArray("ar").length() > 0) {
-                            artist = t.getJSONArray("ar").getJSONObject(0).getString("name");
+                    JSONObject root = new JSONObject(res);
+                    JSONObject pl = root.optJSONObject("playlist");
+                    if (pl == null) pl = root.optJSONObject("result");
+                    if (pl != null && pl.has("tracks")) {
+                        JSONArray tracks = pl.getJSONArray("tracks");
+                        for (int i = 0; i < tracks.length(); i++) {
+                            JSONObject t = tracks.getJSONObject(i);
+                            String songId = "wy_" + t.getLong("id");
+                            String title = t.getString("name");
+                            String artist = "群星";
+                            if (t.has("ar") && t.getJSONArray("ar").length() > 0) {
+                                artist = t.getJSONArray("ar").getJSONObject(0).getString("name");
+                            } else if (t.has("artists") && t.getJSONArray("artists").length() > 0) {
+                                artist = t.getJSONArray("artists").getJSONObject(0).getString("name");
+                            }
+                            String cover = null;
+                            if (t.optJSONObject("al") != null) cover = t.optJSONObject("al").optString("picUrl", null);
+                            else if (t.optJSONObject("album") != null) cover = t.optJSONObject("album").optString("picUrl", null);
+                            songs.add(new MainActivity.DisplayEntry(songId, title, artist, artist + " [320K MP3]", cover, "320K MP3", true, 320));
                         }
-                        String cover = t.optJSONObject("al") != null ? t.optJSONObject("al").optString("picUrl", null) : null;
-                        songs.add(new MainActivity.DisplayEntry(songId, title, artist, artist + " [320K MP3]", cover, "320K MP3", true, 320));
                     }
                 }
             } else if (rawPlaylistId.startsWith("kg_")) {
                 String id = rawPlaylistId.substring(3);
                 String res = httpGet("http://mobilecdn.kugou.com/api/v3/special/song?specialid=" + id + "&pagesize=100&page=1");
                 if (res != null) {
-                    JSONArray arr = new JSONObject(res).getJSONObject("data").getJSONArray("info");
-                    for (int i = 0; i < arr.length(); i++) {
-                        JSONObject o = arr.getJSONObject(i);
-                        String filename = o.optString("filename", "");
-                        String title = filename, artist = "酷狗歌手";
-                        if (filename.contains(" - ")) {
-                            String[] p = filename.split(" - ", 2);
-                            artist = p[0].trim(); title = p[1].trim();
+                    JSONObject root = new JSONObject(res);
+                    if (root.has("data") && root.getJSONObject("data").has("info")) {
+                        JSONArray arr = root.getJSONObject("data").getJSONArray("info");
+                        for (int i = 0; i < arr.length(); i++) {
+                            JSONObject o = arr.getJSONObject(i);
+                            String filename = o.optString("filename", "");
+                            String title = filename, artist = "酷狗歌手";
+                            if (filename.contains(" - ")) {
+                                String[] p = filename.split(" - ", 2);
+                                artist = p[0].trim(); title = p[1].trim();
+                            }
+                            String hash = o.optString("hash", "");
+                            songs.add(new MainActivity.DisplayEntry("kg_" + hash, title, artist, artist + " [320K MP3]", null, "320K MP3", true, 320));
                         }
-                        String hash = o.optString("hash", "");
-                        songs.add(new MainActivity.DisplayEntry("kg_" + hash, title, artist, artist + " [320K MP3]", null, "320K MP3", true, 320));
                     }
                 }
             } else if (rawPlaylistId.startsWith("tx_")) {
                 String id = rawPlaylistId.substring(3);
                 String res = httpGet("https://c.y.qq.com/qzone/fcg-bin/fcg_ucc_getcdinfo_byids_cp.fcg?type=1&json=1&utf8=1&onlysong=0&disstid=" + id + "&format=json&inCharset=utf8&outCharset=utf-8&utf8=1");
                 if (res != null) {
-                    JSONArray songlist = new JSONObject(res).getJSONArray("cdlist").getJSONObject(0).getJSONArray("songlist");
-                    for (int i = 0; i < songlist.length(); i++) {
-                        JSONObject s = songlist.getJSONObject(i);
-                        String songmid = s.getString("songmid");
-                        String title = s.getString("songname");
-                        String artist = "QQ歌手";
-                        if (s.has("singer") && s.getJSONArray("singer").length() > 0) {
-                            artist = s.getJSONArray("singer").getJSONObject(0).getString("name");
+                    JSONObject root = new JSONObject(res);
+                    if (root.has("cdlist") && root.getJSONArray("cdlist").length() > 0) {
+                        JSONArray songlist = root.getJSONArray("cdlist").getJSONObject(0).getJSONArray("songlist");
+                        for (int i = 0; i < songlist.length(); i++) {
+                            JSONObject s = songlist.getJSONObject(i);
+                            String songmid = s.getString("songmid");
+                            String title = s.getString("songname");
+                            String artist = "QQ歌手";
+                            if (s.has("singer") && s.getJSONArray("singer").length() > 0) {
+                                artist = s.getJSONArray("singer").getJSONObject(0).getString("name");
+                            }
+                            songs.add(new MainActivity.DisplayEntry("tx_" + songmid, title, artist, artist + " [320K MP3]", null, "320K MP3", true, 320));
                         }
-                        songs.add(new MainActivity.DisplayEntry("tx_" + songmid, title, artist, artist + " [320K MP3]", null, "320K MP3", true, 320));
                     }
                 }
             } else if (rawPlaylistId.startsWith("kw_")) {
                 String id = rawPlaylistId.substring(3);
                 String res = httpGet("http://nplserver.kuwo.cn/pl.s?content=list&id=" + id + "&pn=0&rn=100");
                 if (res != null) {
-                    JSONArray musiclist = new JSONObject(res).getJSONArray("musiclist");
-                    for (int i = 0; i < musiclist.length(); i++) {
-                        JSONObject o = musiclist.getJSONObject(i);
-                        String songId = o.getString("id");
-                        String title = o.getString("name");
-                        String artist = o.optString("artist", "酷我歌手");
-                        songs.add(new MainActivity.DisplayEntry("kw_" + songId, title, artist, artist + " [320K MP3]", null, "320K MP3", true, 320));
+                    JSONObject root = new JSONObject(res);
+                    if (root.has("musiclist")) {
+                        JSONArray musiclist = root.getJSONArray("musiclist");
+                        for (int i = 0; i < musiclist.length(); i++) {
+                            JSONObject o = musiclist.getJSONObject(i);
+                            String songId = o.getString("id");
+                            String title = o.getString("name");
+                            String artist = o.optString("artist", "酷我歌手");
+                            songs.add(new MainActivity.DisplayEntry("kw_" + songId, title, artist, artist + " [320K MP3]", null, "320K MP3", true, 320));
+                        }
                     }
                 }
             } else if (rawPlaylistId.startsWith("mg_")) {
                 String id = rawPlaylistId.substring(3);
                 String res = httpGet("https://app.c.nf.migu.cn/MIGUM2.0/v1.0/user/queryMusicListSongs.do?musicListId=" + id + "&pageNo=1&pageSize=100");
                 if (res != null) {
-                    JSONArray listArr = new JSONObject(res).getJSONArray("list");
-                    for (int i = 0; i < listArr.length(); i++) {
-                        JSONObject o = listArr.getJSONObject(i);
-                        String songId = o.optString("songId", "");
-                        String title = o.optString("songName", "");
-                        String artist = o.optString("singerName", "咪咕歌手");
-                        songs.add(new MainActivity.DisplayEntry("mg_" + songId, title, artist, artist + " [320K MP3]", null, "320K MP3", true, 320));
+                    JSONObject root = new JSONObject(res);
+                    if (root.has("list")) {
+                        JSONArray listArr = root.getJSONArray("list");
+                        for (int i = 0; i < listArr.length(); i++) {
+                            JSONObject o = listArr.getJSONObject(i);
+                            String songId = o.optString("songId", "");
+                            String title = o.optString("songName", "");
+                            String artist = o.optString("singerName", "咪咕歌手");
+                            songs.add(new MainActivity.DisplayEntry("mg_" + songId, title, artist, artist + " [320K MP3]", null, "320K MP3", true, 320));
+                        }
                     }
                 }
             }
@@ -455,7 +511,7 @@ public class LxApiHelper {
                 {"校园音乐人排行榜", "75"}
             };
         } else if ("kg".equals(platformCode)) {
-            // 对齐 酷狗音乐 25 个榜单
+            // 对齐 酷狗音乐 核心榜单
             return new String[][]{
                 {"TOP500", "8888"}, {"飙升榜", "6666"}, {"蜂鸟流行音乐榜", "52144"},
                 {"网络红歌榜", "23784"}, {"国风新韵榜", "33161"}, {"内地榜", "31308"},
@@ -468,7 +524,7 @@ public class LxApiHelper {
             // 对齐 酷我音乐 43 个榜单截图
             return new String[][]{
                 {"酷我飙升榜", "93"}, {"酷我新歌榜", "17"}, {"酷我热歌榜", "16"}, {"经典怀旧榜", "26"},
-                {"华语榜", "158"}, {"粤语榜", "183"}, {"欧美榜", "13"}, {"韩语榜", "12"},
+                {"华语榜", "284"}, {"粤语榜", "183"}, {"欧美榜", "13"}, {"韩语榜", "12"},
                 {"日语榜", "154"}, {"会员畅听榜", "283"}, {"网红新歌榜", "158"}, {"影视金曲榜", "26"},
                 {"DJ嗨歌榜", "145"}, {"真声音", "64"}, {"Billboard榜", "60"}, {"iTunes音乐榜", "49"},
                 {"beatport电音榜", "50"}, {"英国UK榜", "51"}, {"百大DJ榜", "52"}, {"YouTube音乐排行榜", "53"},
@@ -486,56 +542,83 @@ public class LxApiHelper {
         }
     }
 
-    // 8. 榜单歌曲抓取
+    // 8. 排行榜歌曲列表获取（QQ音乐使用官方 musicu 服务，避免旧 API 返回空）
     public static ArrayList<MainActivity.DisplayEntry> fetchLeaderboardSongs(String platform, String boardKey) {
         ArrayList<MainActivity.DisplayEntry> songs = new ArrayList<MainActivity.DisplayEntry>();
         try {
             if ("wy".equalsIgnoreCase(platform)) {
                 return fetchPlaylistSongs("wy_" + boardKey);
             } else if ("tx".equalsIgnoreCase(platform)) {
-                String url = "https://c.y.qq.com/v8/fcg-bin/fcg_v8_toplist_cp.fcg?topid=" + boardKey + "&type=top&format=json&inCharset=utf8&outCharset=utf-8&utf8=1";
+                // 优先使用官方 musicu.fcg 核心服务，支持全量榜单无缝获取
+                String reqJson = "{\"detail\":{\"module\":\"musicToplist.ToplistInfoServer\",\"method\":\"GetDetail\",\"param\":{\"topId\":" + boardKey + ",\"offset\":0,\"num\":100}}}";
+                String url = "https://u.y.qq.com/cgi-bin/musicu.fcg?format=json&inCharset=utf8&outCharset=utf-8&utf8=1&data=" + URLEncoder.encode(reqJson, "UTF-8");
                 String res = httpGet(url);
-                if (res != null) {
-                    JSONArray arr = new JSONObject(res).getJSONArray("songlist");
+                if (res != null && res.contains("\"songInfoList\"")) {
+                    JSONObject root = new JSONObject(res);
+                    JSONArray arr = root.getJSONObject("detail").getJSONObject("data").getJSONArray("songInfoList");
                     for (int i = 0; i < arr.length(); i++) {
-                        JSONObject data = arr.getJSONObject(i).getJSONObject("data");
-                        String mid = data.getString("songmid");
-                        String title = data.getString("songname");
+                        JSONObject s = arr.getJSONObject(i);
+                        String mid = s.getString("mid");
+                        String title = s.getString("name");
                         String artist = "群星";
-                        if (data.has("singer") && data.getJSONArray("singer").length() > 0) {
-                            artist = data.getJSONArray("singer").getJSONObject(0).getString("name");
+                        if (s.has("singer") && s.getJSONArray("singer").length() > 0) {
+                            artist = s.getJSONArray("singer").getJSONObject(0).getString("name");
                         }
                         songs.add(new MainActivity.DisplayEntry("tx_" + mid, title, artist, artist + " [320K MP3]", null, "320K MP3", true, 320));
+                    }
+                }
+                // 兜底备用接口
+                if (songs.isEmpty()) {
+                    String fallbackUrl = "https://c.y.qq.com/v8/fcg-bin/fcg_v8_toplist_cp.fcg?topid=" + boardKey + "&type=top&format=json&inCharset=utf8&outCharset=utf-8&utf8=1";
+                    String fbRes = httpGet(fallbackUrl);
+                    if (fbRes != null) {
+                        JSONArray arr = new JSONObject(fbRes).getJSONArray("songlist");
+                        for (int i = 0; i < arr.length(); i++) {
+                            JSONObject data = arr.getJSONObject(i).getJSONObject("data");
+                            String mid = data.getString("songmid");
+                            String title = data.getString("songname");
+                            String artist = "群星";
+                            if (data.has("singer") && data.getJSONArray("singer").length() > 0) {
+                                artist = data.getJSONArray("singer").getJSONObject(0).getString("name");
+                            }
+                            songs.add(new MainActivity.DisplayEntry("tx_" + mid, title, artist, artist + " [320K MP3]", null, "320K MP3", true, 320));
+                        }
                     }
                 }
             } else if ("kg".equalsIgnoreCase(platform)) {
                 String url = "http://mobilecdn.kugou.com/api/v3/rank/song?rankid=" + boardKey + "&page=1&pagesize=100";
                 String res = httpGet(url);
                 if (res != null) {
-                    JSONArray arr = new JSONObject(res).getJSONObject("data").getJSONArray("info");
-                    for (int i = 0; i < arr.length(); i++) {
-                        JSONObject o = arr.getJSONObject(i);
-                        String filename = o.optString("filename", "");
-                        String title = filename, artist = "酷狗歌手";
-                        if (filename.contains(" - ")) {
-                            String[] p = filename.split(" - ", 2);
-                            artist = p[0].trim(); title = p[1].trim();
+                    JSONObject root = new JSONObject(res);
+                    if (root.has("data") && root.getJSONObject("data").has("info")) {
+                        JSONArray arr = root.getJSONObject("data").getJSONArray("info");
+                        for (int i = 0; i < arr.length(); i++) {
+                            JSONObject o = arr.getJSONObject(i);
+                            String filename = o.optString("filename", "");
+                            String title = filename, artist = "酷狗歌手";
+                            if (filename.contains(" - ")) {
+                                String[] p = filename.split(" - ", 2);
+                                artist = p[0].trim(); title = p[1].trim();
+                            }
+                            String hash = o.optString("hash", "");
+                            songs.add(new MainActivity.DisplayEntry("kg_" + hash, title, artist, artist + " [320K MP3]", null, "320K MP3", true, 320));
                         }
-                        String hash = o.optString("hash", "");
-                        songs.add(new MainActivity.DisplayEntry("kg_" + hash, title, artist, artist + " [320K MP3]", null, "320K MP3", true, 320));
                     }
                 }
             } else if ("kw".equalsIgnoreCase(platform)) {
                 String url = "http://kbangserver.kuwo.cn/ksong.s?from=pc&fmt=json&type=bang&data=content&id=" + boardKey + "&pn=0&rn=100";
                 String res = httpGet(url);
                 if (res != null) {
-                    JSONArray arr = new JSONObject(res).getJSONArray("musiclist");
-                    for (int i = 0; i < arr.length(); i++) {
-                        JSONObject o = arr.getJSONObject(i);
-                        String id = o.getString("id");
-                        String title = o.getString("name");
-                        String artist = o.optString("artist", "酷我歌手");
-                        songs.add(new MainActivity.DisplayEntry("kw_" + id, title, artist, artist + " [320K MP3]", null, "320K MP3", true, 320));
+                    JSONObject root = new JSONObject(res);
+                    if (root.has("musiclist")) {
+                        JSONArray arr = root.getJSONArray("musiclist");
+                        for (int i = 0; i < arr.length(); i++) {
+                            JSONObject o = arr.getJSONObject(i);
+                            String id = o.getString("id");
+                            String title = o.getString("name");
+                            String artist = o.optString("artist", "酷我歌手");
+                            songs.add(new MainActivity.DisplayEntry("kw_" + id, title, artist, artist + " [320K MP3]", null, "320K MP3", true, 320));
+                        }
                     }
                 }
             } else if ("mg".equalsIgnoreCase(platform)) {
@@ -561,6 +644,7 @@ public class LxApiHelper {
         return songs;
     }
 
+    // 9. 智能防盗链 HTTP GET (根据不同平台自动切换专属 Referer/Cookie，避免 403 封锁)
     public static String httpGet(String urlStr) {
         HttpURLConnection conn = null;
         try {
@@ -571,7 +655,22 @@ public class LxApiHelper {
             conn.setConnectTimeout(7000);
             conn.setReadTimeout(9000);
             conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36");
-            conn.setRequestProperty("Referer", "https://y.qq.com/");
+
+            // 动态匹配防盗链 Referer
+            if (urlStr.contains("163.com")) {
+                conn.setRequestProperty("Referer", "https://music.163.com/");
+            } else if (urlStr.contains("qq.com")) {
+                conn.setRequestProperty("Referer", "https://y.qq.com/");
+            } else if (urlStr.contains("kugou.com")) {
+                conn.setRequestProperty("Referer", "http://www.kugou.com/");
+            } else if (urlStr.contains("kuwo.cn")) {
+                conn.setRequestProperty("Referer", "http://www.kuwo.cn/");
+                conn.setRequestProperty("csrf", "HH12345678");
+                conn.setRequestProperty("Cookie", "kw_token=HH12345678");
+            } else if (urlStr.contains("migu.cn")) {
+                conn.setRequestProperty("Referer", "https://music.migu.cn/");
+            }
+
             if (conn instanceof HttpsURLConnection) {
                 ((HttpsURLConnection) conn).setSSLSocketFactory(new TLSSocketFactory());
             }
