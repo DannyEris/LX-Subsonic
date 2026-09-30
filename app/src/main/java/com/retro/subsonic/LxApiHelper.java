@@ -567,6 +567,7 @@ public class LxApiHelper {
         return fetchPlaylistSongs(rawPlaylistId, "320K MP3");
     }
 
+    // 核心重构：网易云增加 &n=1000 参数与 trackIds 二次全量获取机制
     public static ArrayList<MainActivity.DisplayEntry> fetchPlaylistSongs(String rawPlaylistId, String defaultQuality) {
         ArrayList<MainActivity.DisplayEntry> songs = new ArrayList<MainActivity.DisplayEntry>();
         String qualityLabel = (defaultQuality != null && defaultQuality.length() > 0) ? defaultQuality : "320K MP3";
@@ -575,30 +576,95 @@ public class LxApiHelper {
         try {
             if (rawPlaylistId.startsWith("wy_")) {
                 String id = rawPlaylistId.substring(3);
-                String res = httpGet("https://music.163.com/api/playlist/detail?id=" + id);
+
+                // 优先请求带 &n=1000 的 v6 接口，直接指示服务端展开最多 1000 首歌
+                String res = httpGet("https://music.163.com/api/v6/playlist/detail?id=" + id + "&n=1000");
                 if (res == null || !res.contains("\"tracks\"")) {
-                    res = httpGet("https://music.163.com/api/v6/playlist/detail?id=" + id);
+                    res = httpGet("https://music.163.com/api/playlist/detail?id=" + id + "&n=1000");
                 }
+
                 if (res != null) {
                     JSONObject root = new JSONObject(res);
                     JSONObject pl = root.optJSONObject("playlist");
                     if (pl == null) pl = root.optJSONObject("result");
-                    if (pl != null && pl.has("tracks")) {
-                        JSONArray tracks = pl.getJSONArray("tracks");
-                        for (int i = 0; i < tracks.length(); i++) {
-                            JSONObject t = tracks.getJSONObject(i);
-                            String songId = "wy_" + t.getLong("id");
-                            String title = t.getString("name");
-                            String artist = "群星";
-                            if (t.has("ar") && t.getJSONArray("ar").length() > 0) {
-                                artist = t.getJSONArray("ar").getJSONObject(0).getString("name");
-                            } else if (t.has("artists") && t.getJSONArray("artists").length() > 0) {
-                                artist = t.getJSONArray("artists").getJSONObject(0).getString("name");
+
+                    if (pl != null) {
+                        JSONArray tracks = pl.optJSONArray("tracks");
+                        JSONArray trackIds = pl.optJSONArray("trackIds");
+
+                        // 如果 tracks 数量完整（超过 15 首，或者已涵盖全部 trackIds），直接解析 tracks
+                        if (tracks != null && (trackIds == null || tracks.length() >= trackIds.length() || tracks.length() > 15)) {
+                            for (int i = 0; i < tracks.length(); i++) {
+                                JSONObject t = tracks.getJSONObject(i);
+                                String songId = "wy_" + t.getLong("id");
+                                String title = t.getString("name");
+                                String artist = "群星";
+                                if (t.has("ar") && t.getJSONArray("ar").length() > 0) {
+                                    artist = t.getJSONArray("ar").getJSONObject(0).getString("name");
+                                } else if (t.has("artists") && t.getJSONArray("artists").length() > 0) {
+                                    artist = t.getJSONArray("artists").getJSONObject(0).getString("name");
+                                }
+                                String cover = null;
+                                if (t.optJSONObject("al") != null) cover = t.optJSONObject("al").optString("picUrl", null);
+                                else if (t.optJSONObject("album") != null) cover = t.optJSONObject("album").optString("picUrl", null);
+                                songs.add(new MainActivity.DisplayEntry(songId, title, artist, artist + " [" + qualityLabel + "]", cover, qualityLabel, true, bitRateNumeric));
                             }
-                            String cover = null;
-                            if (t.optJSONObject("al") != null) cover = t.optJSONObject("al").optString("picUrl", null);
-                            else if (t.optJSONObject("album") != null) cover = t.optJSONObject("album").optString("picUrl", null);
-                            songs.add(new MainActivity.DisplayEntry(songId, title, artist, artist + " [" + qualityLabel + "]", cover, qualityLabel, true, bitRateNumeric));
+                        } else if (trackIds != null && trackIds.length() > 0) {
+                            // 关键保障：若 tracks 仍然被限制为 10 首，提取 trackIds 批量拉取真实曲目详情（最多取 150 首兼顾低配硬件）
+                            int fetchCount = Math.min(trackIds.length(), 150);
+                            StringBuilder idsParam = new StringBuilder("[");
+                            for (int i = 0; i < fetchCount; i++) {
+                                JSONObject tidObj = trackIds.getJSONObject(i);
+                                long tid = tidObj.optLong("id", 0);
+                                if (tid > 0) {
+                                    if (idsParam.length() > 1) idsParam.append(",");
+                                    idsParam.append(tid);
+                                }
+                            }
+                            idsParam.append("]");
+
+                            String songDetailUrl = "https://music.163.com/api/song/detail/?id=0&ids=" + URLEncoder.encode(idsParam.toString(), "UTF-8");
+                            String songDetailRes = httpGet(songDetailUrl);
+                            if (songDetailRes != null && songDetailRes.contains("\"songs\"")) {
+                                JSONObject detailRoot = new JSONObject(songDetailRes);
+                                JSONArray songsArr = detailRoot.optJSONArray("songs");
+                                if (songsArr != null) {
+                                    for (int i = 0; i < songsArr.length(); i++) {
+                                        JSONObject t = songsArr.getJSONObject(i);
+                                        String songId = "wy_" + t.getLong("id");
+                                        String title = t.getString("name");
+                                        String artist = "群星";
+                                        if (t.has("ar") && t.getJSONArray("ar").length() > 0) {
+                                            artist = t.getJSONArray("ar").getJSONObject(0).getString("name");
+                                        } else if (t.has("artists") && t.getJSONArray("artists").length() > 0) {
+                                            artist = t.getJSONArray("artists").getJSONObject(0).getString("name");
+                                        }
+                                        String cover = null;
+                                        if (t.optJSONObject("al") != null) cover = t.optJSONObject("al").optString("picUrl", null);
+                                        else if (t.optJSONObject("album") != null) cover = t.optJSONObject("album").optString("picUrl", null);
+                                        songs.add(new MainActivity.DisplayEntry(songId, title, artist, artist + " [" + qualityLabel + "]", cover, qualityLabel, true, bitRateNumeric));
+                                    }
+                                }
+                            }
+
+                            // 兜底保护：网络若波动导致 song/detail 未返回，保留原有的 tracks 数组
+                            if (songs.isEmpty() && tracks != null) {
+                                for (int i = 0; i < tracks.length(); i++) {
+                                    JSONObject t = tracks.getJSONObject(i);
+                                    String songId = "wy_" + t.getLong("id");
+                                    String title = t.getString("name");
+                                    String artist = "群星";
+                                    if (t.has("ar") && t.getJSONArray("ar").length() > 0) {
+                                        artist = t.getJSONArray("ar").getJSONObject(0).getString("name");
+                                    } else if (t.has("artists") && t.getJSONArray("artists").length() > 0) {
+                                        artist = t.getJSONArray("artists").getJSONObject(0).getString("name");
+                                    }
+                                    String cover = null;
+                                    if (t.optJSONObject("al") != null) cover = t.optJSONObject("al").optString("picUrl", null);
+                                    else if (t.optJSONObject("album") != null) cover = t.optJSONObject("album").optString("picUrl", null);
+                                    songs.add(new MainActivity.DisplayEntry(songId, title, artist, artist + " [" + qualityLabel + "]", cover, qualityLabel, true, bitRateNumeric));
+                                }
+                            }
                         }
                     }
                 }
