@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/bg_card"
+    android:padding="14dp">
+
+    <!-- 顶部标题与关闭按钮 -->
+    <RelativeLayout
+        android:layout_width="match_parent"
+        android:layout_height="40dp">
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_alignParentLeft="true"
+            android:layout_centerVertical="true"
+            android:text="选择匹配歌词 (网易云/酷狗)"
+            android:textColor="#ffffff"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+        <Button
+            android:id="@+id/btn_lyric_picker_close"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:layout_alignParentRight="true"
+            android:layout_centerVertical="true"
+            android:background="@drawable/bg_btn_default"
+            android:text="✕"
+            android:textColor="#a0a5b5"
+            android:textSize="14sp" />
+    </RelativeLayout>
+
+    <!-- 搜索重搜栏 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="36dp"
+        android:orientation="horizontal"
+        android:layout_marginTop="8dp">
+        <EditText
+            android:id="@+id/et_lyric_search_query"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:background="@drawable/bg_btn_pill"
+            android:hint="输入歌名、歌手重新搜索..."
+            android:textColor="#ffffff"
+            android:textColorHint="#777777"
+            android:textSize="12sp"
+            android:paddingLeft="12dp"
+            android:paddingRight="12dp"
+            android:singleLine="true" />
+        <Button
+            android:id="@+id/btn_lyric_search_submit"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:background="@drawable/bg_btn_accent"
+            android:text="搜索"
+            android:textColor="#00e5ff"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:layout_marginLeft="6dp" />
+    </LinearLayout>
+
+    <!-- 候选歌词列表容器 -->
+    <ListView
+        android:id="@+id/lv_lyric_candidates"
+        android:layout_width="match_parent"
+        android:layout_height="260dp"
+        android:layout_marginTop="10dp"
+        android:divider="#252a36"
+        android:dividerHeight="1dp" />
+
+</LinearLayout>
