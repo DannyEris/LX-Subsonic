@@ -4,7 +4,6 @@
     android:layout_height="match_parent"
     android:background="@drawable/bg_main_gradient">
 
-    <!-- 主界面：垂直线性布局 -->
     <LinearLayout
         android:id="@+id/layout_main_view"
         android:layout_width="match_parent"
@@ -12,7 +11,6 @@
         android:orientation="vertical"
         android:padding="6dp">
 
-        <!-- 上方工作区：左侧侧边栏 + 右侧多页面容器 -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="0dp"
@@ -295,7 +293,7 @@
                     </LinearLayout>
                 </LinearLayout>
 
-                <!-- 2. 歌单广场页 (支持四方网格/列表切换、多排序机制) -->
+                <!-- 2. 歌单广场页 -->
                 <LinearLayout
                     android:id="@+id/layout_page_plaza"
                     android:layout_width="match_parent"
@@ -327,7 +325,6 @@
                             android:paddingLeft="8dp"
                             android:paddingRight="8dp"
                             android:layout_marginLeft="4dp" />
-                        <!-- 视图切换：网格 / 列表 -->
                         <Button
                             android:id="@+id/btn_plaza_view_mode"
                             android:layout_width="wrap_content"
@@ -339,7 +336,6 @@
                             android:paddingLeft="8dp"
                             android:paddingRight="8dp"
                             android:layout_marginLeft="4dp" />
-                        <!-- 刷新按钮：解决之前空白问题，明确显示汉字“刷新” -->
                         <Button
                             android:id="@+id/btn_plaza_refresh"
                             android:layout_width="wrap_content"
@@ -386,7 +382,7 @@
                             android:layout_marginLeft="4dp" />
                     </LinearLayout>
 
-                    <!-- 二级排序栏 (如: 最热 / 最新 / 推荐 / 飙升等) 与状态 -->
+                    <!-- 二级排序栏与状态 -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="30dp"
@@ -420,14 +416,13 @@
                             android:visibility="gone" />
                     </LinearLayout>
 
-                    <!-- 歌单呈现容器：四方网格视图 与 传统列表视图 -->
+                    <!-- 歌单呈现容器：四方网格视图与列表视图 -->
                     <FrameLayout
                         android:id="@+id/layout_plaza_list_container"
                         android:layout_width="match_parent"
                         android:layout_height="0dp"
                         android:layout_weight="1"
                         android:layout_marginTop="4dp">
-                        <!-- 视图 1：网格视图 -->
                         <GridView
                             android:id="@+id/gv_plaza_playlists"
                             android:layout_width="match_parent"
@@ -437,7 +432,6 @@
                             android:verticalSpacing="4dp"
                             android:stretchMode="columnWidth"
                             android:visibility="visible" />
-                        <!-- 视图 2：列表视图 -->
                         <ListView
                             android:id="@+id/lv_plaza_playlists"
                             android:layout_width="match_parent"
