@@ -10,6 +10,7 @@ import android.media.MediaPlayer;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -17,6 +18,8 @@ import org.json.JSONObject;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Random;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class MusicService extends Service {
 
@@ -58,9 +61,12 @@ public class MusicService extends Service {
 
     private MediaPlayer mediaPlayer;
     private LocalStreamProxy streamProxy;
-    private Handler progressHandler = new Handler();
+    private Handler progressHandler = new Handler(Looper.getMainLooper());
     private boolean isMuted = false;
     private int currentBufferPercent = -1;
+
+    // 核心改进：专属后台单线程执行器，彻底解放 UI 线程，杜绝 ANR
+    private final ExecutorService playbackExecutor = Executors.newSingleThreadExecutor();
 
     private Runnable progressRunnable = new Runnable() {
         @Override
@@ -99,7 +105,40 @@ public class MusicService extends Service {
     public void onCreate() {
         super.onCreate();
         currentMode = getSharedPreferences("subsonic_cfg", MODE_PRIVATE).getInt("play_mode", MODE_LOOP_ALL);
+        mediaPlayer = new MediaPlayer();
+        setupMediaPlayerListeners();
         progressHandler.post(progressRunnable);
+    }
+
+    private void setupMediaPlayerListeners() {
+        mediaPlayer.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
+            @Override
+            public void onPrepared(MediaPlayer mp) {
+                float v = isMuted ? 0.0f : 1.0f;
+                mp.setVolume(v, v);
+                mp.start();
+                AudioEffectsManager.getInstance().attachMediaPlayer(mp, MusicService.this);
+                broadcastStatus();
+                startForegroundNotification();
+            }
+        });
+
+        mediaPlayer.setOnCompletionListener(new MediaPlayer.OnCompletionListener() {
+            @Override
+            public void onCompletion(MediaPlayer mp) {
+                onTrackCompleted();
+            }
+        });
+
+        // 关键防护：增加错误监听并返回 true，阻止系统在出错时误调用 onCompletion 导致无限切歌死循环
+        mediaPlayer.setOnErrorListener(new MediaPlayer.OnErrorListener() {
+            @Override
+            public boolean onError(MediaPlayer mp, int what, int extra) {
+                currentBufferPercent = -1;
+                broadcastStatus();
+                return true;
+            }
+        });
     }
 
     @Override
@@ -131,20 +170,31 @@ public class MusicService extends Service {
         return START_STICKY;
     }
 
-    private void playIndex(int index) {
+    private void playIndex(final int index) {
         if (index < 0 || index >= playlist.size()) return;
         currentIndex = index;
         savePlaybackState(this);
 
-        final SongItem item = playlist.get(currentIndex);
+        currentBufferPercent = 0;
+        broadcastStatus();
+
+        // 将准备、连接、代理全流程派发至工作线程执行，不占主线程一毫秒
+        playbackExecutor.execute(new Runnable() {
+            @Override
+            public void run() {
+                doPlayIndexBackground(index);
+            }
+        });
+    }
+
+    private synchronized void doPlayIndexBackground(int index) {
+        if (index < 0 || index >= playlist.size()) return;
+        final SongItem item = playlist.get(index);
 
         if (streamProxy != null) {
             streamProxy.stop();
             streamProxy = null;
         }
-
-        currentBufferPercent = 0;
-        broadcastStatus();
 
         if (item.streamUrl != null && (item.streamUrl.startsWith("file://") || item.streamUrl.startsWith("/"))) {
             currentBufferPercent = 100;
@@ -186,16 +236,11 @@ public class MusicService extends Service {
         }
     }
 
-    private void startMediaPlayer(String playUrl) {
+    private synchronized void startMediaPlayer(String playUrl) {
         try {
             if (mediaPlayer == null) {
                 mediaPlayer = new MediaPlayer();
-                mediaPlayer.setOnCompletionListener(new MediaPlayer.OnCompletionListener() {
-                    @Override
-                    public void onCompletion(MediaPlayer mp) {
-                        onTrackCompleted();
-                    }
-                });
+                setupMediaPlayerListeners();
             } else {
                 mediaPlayer.reset();
             }
@@ -207,18 +252,8 @@ public class MusicService extends Service {
             }
 
             mediaPlayer.prepareAsync();
-            mediaPlayer.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
-                @Override
-                public void onPrepared(MediaPlayer mp) {
-                    float v = isMuted ? 0.0f : 1.0f;
-                    mp.setVolume(v, v);
-                    mp.start();
-                    AudioEffectsManager.getInstance().attachMediaPlayer(mp, MusicService.this);
-                    broadcastStatus();
-                    startForegroundNotification();
-                }
-            });
         } catch (Exception e) {
+            currentBufferPercent = -1;
             broadcastStatus();
         }
     }
@@ -276,7 +311,7 @@ public class MusicService extends Service {
 
     private void cycleMode() {
         currentMode = (currentMode + 1) % 3;
-        getSharedPreferences("subsonic_cfg", MODE_PRIVATE).edit().putInt("play_mode", currentMode).commit();
+        getSharedPreferences("subsonic_cfg", MODE_PRIVATE).edit().putInt("play_mode", currentMode).apply();
         broadcastStatus();
     }
 
@@ -332,7 +367,7 @@ public class MusicService extends Service {
             }
             sp.edit().putString("saved_playlist", arr.toString())
                     .putInt("saved_index", currentIndex)
-                    .commit();
+                    .apply();
         } catch (Exception ignored) {}
     }
 
@@ -365,6 +400,7 @@ public class MusicService extends Service {
     public void onDestroy() {
         super.onDestroy();
         progressHandler.removeCallbacksAndMessages(null);
+        playbackExecutor.shutdownNow();
         if (streamProxy != null) {
             streamProxy.stop();
             streamProxy = null;
