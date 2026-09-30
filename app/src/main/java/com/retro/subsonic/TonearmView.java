@@ -1,16 +1,32 @@
 package com.retro.subsonic;
 
+import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.LinearGradient;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.graphics.Shader;
 import android.util.AttributeSet;
 import android.view.View;
+import android.view.animation.DecelerateInterpolator;
 
 public class TonearmView extends View {
 
-    private Paint paint;
-    private Path path;
+    // 旋转基准角度：暂停时外摆 -32度，播放时摆入黑胶唱片唱轨处 -3度
+    private static final float ANGLE_PAUSED = -32.0f;
+    private static final float ANGLE_PLAYING = -3.0f;
+
+    private float currentAngle = ANGLE_PAUSED;
+    private boolean isPlaying = false;
+    private ValueAnimator animator;
+
+    private Paint basePaint;
+    private Paint armPaint;
+    private Paint headPaint;
+    private Paint needlePaint;
+    private Path armPath;
 
     public TonearmView(Context context) {
         super(context);
@@ -28,74 +44,107 @@ public class TonearmView extends View {
     }
 
     private void init() {
-        paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        path = new Path();
-        try {
-            // 确保老版 Android 4.2.2 2D 硬件加速对 Path 裁切保持兼容
-            setLayerType(View.LAYER_TYPE_SOFTWARE, null);
-        } catch (Throwable ignored) {}
+        basePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        basePaint.setStyle(Paint.Style.FILL);
+
+        armPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        armPaint.setStyle(Paint.Style.STROKE);
+        armPaint.setStrokeCap(Paint.Cap.ROUND);
+
+        headPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        headPaint.setStyle(Paint.Style.FILL);
+
+        needlePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        needlePaint.setStyle(Paint.Style.FILL);
+
+        armPath = new Path();
+    }
+
+    public void setPlaying(boolean playing) {
+        if (this.isPlaying == playing) return;
+        this.isPlaying = playing;
+
+        if (animator != null && animator.isRunning()) {
+            animator.cancel();
+        }
+
+        float targetAngle = playing ? ANGLE_PLAYING : ANGLE_PAUSED;
+        animator = ValueAnimator.ofFloat(currentAngle, targetAngle);
+        animator.setDuration(450);
+        animator.setInterpolator(new DecelerateInterpolator());
+        animator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+            @Override
+            public void onAnimationUpdate(ValueAnimator animation) {
+                currentAngle = (Float) animation.getAnimatedValue();
+                invalidate();
+            }
+        });
+        animator.start();
+    }
+
+    public boolean isPlaying() {
+        return isPlaying;
     }
 
     @Override
     protected void onDraw(Canvas canvas) {
-        try {
-            super.onDraw(canvas);
-            int w = getWidth();
-            int h = getHeight();
-            if (w <= 0 || h <= 0) return;
+        super.onDraw(canvas);
 
-            float density = getResources().getDisplayMetrics().density;
+        int w = getWidth();
+        int h = getHeight();
+        if (w <= 0 || h <= 0) return;
 
-            // 1. 顶部白色金属轴座 (圆心)
-            float pivotX = w * 0.50f;
-            float pivotY = 16f * density;
+        // 唱臂基座固定在右上角区域
+        float pivotX = w * 0.82f;
+        float pivotY = h * 0.16f;
 
-            paint.setStyle(Paint.Style.FILL);
-            paint.setColor(0xFFD8D8DC);
-            canvas.drawCircle(pivotX, pivotY, 8f * density, paint);
+        canvas.save();
+        // 绕基座轴心旋转
+        canvas.rotate(currentAngle, pivotX, pivotY);
 
-            paint.setColor(0xFFFFFFFF);
-            canvas.drawCircle(pivotX, pivotY, 5.5f * density, paint);
+        float density = getResources().getDisplayMetrics().density;
 
-            paint.setColor(0xFF26282E);
-            canvas.drawCircle(pivotX, pivotY, 2.5f * density, paint);
+        // 1. 唱臂金属杆（复古S型微弧金属杆身）
+        armPaint.setStrokeWidth(3.5f * density);
+        armPaint.setShader(new LinearGradient(pivotX, pivotY, pivotX - w * 0.5f, pivotY + h * 0.6f,
+                new int[]{0xFFE0E0E0, 0xFF888888, 0xFF00E5FF}, null, Shader.TileMode.CLAMP));
 
-            // 2. 优雅金属弯曲臂
-            paint.setStyle(Paint.Style.STROKE);
-            paint.setColor(0xFFFFFFFF);
-            paint.setStrokeWidth(3.0f * density);
-            paint.setStrokeCap(Paint.Cap.ROUND);
-            paint.setStrokeJoin(Paint.Join.ROUND);
+        armPath.reset();
+        armPath.moveTo(pivotX, pivotY);
+        float endArmX = pivotX - w * 0.44f;
+        float endArmY = pivotY + h * 0.62f;
+        armPath.quadTo(pivotX - w * 0.15f, pivotY + h * 0.35f, endArmX, endArmY);
+        canvas.drawPath(armPath, armPaint);
+        armPaint.setShader(null);
 
-            path.reset();
-            path.moveTo(pivotX, pivotY);
+        // 2. 唱头盒 (Cartridge)
+        headPaint.setColor(0xFF222530);
+        canvas.save();
+        canvas.translate(endArmX, endArmY);
+        canvas.rotate(18); // 唱头顺应角度
+        canvas.drawRoundRect(-7 * density, 0, 7 * density, 22 * density, 3 * density, 3 * density, headPaint);
 
-            float elbowX = w * 0.68f;
-            float elbowY = h * 0.35f;
+        // 唱头高光边
+        headPaint.setColor(0xFF00E5FF);
+        canvas.drawCircle(0, 5 * density, 2 * density, headPaint);
 
-            float targetX = w * 0.72f;
-            float targetY = h * 0.46f;
+        // 唱针针尖 (Stylus)
+        needlePaint.setColor(0xFFFF5252);
+        canvas.drawRect(-1.5f * density, 20 * density, 1.5f * density, 26 * density, needlePaint);
+        canvas.restore();
 
-            path.cubicTo(pivotX + 2f * density, pivotY + 26f * density,
-                         elbowX + 4f * density, elbowY - 16f * density,
-                         elbowX, elbowY);
+        // 3. 顶部配重陀 (Counterweight)
+        basePaint.setColor(0xFF424242);
+        canvas.drawCircle(pivotX + 8 * density, pivotY - 12 * density, 8 * density, basePaint);
 
-            path.lineTo(targetX, targetY);
-            canvas.drawPath(path, paint);
+        canvas.restore();
 
-            // 3. 唱针拾音唱头
-            canvas.save();
-            canvas.translate(targetX, targetY);
-            canvas.rotate(-32f);
-
-            paint.setStyle(Paint.Style.FILL);
-            paint.setColor(0xFFFFFFFF);
-            canvas.drawRect(-4f * density, -2.5f * density, 13f * density, 4f * density, paint);
-
-            paint.setColor(0xFF1E2026);
-            canvas.drawRect(2f * density, -2.5f * density, 4.5f * density, 4f * density, paint);
-
-            canvas.restore();
-        } catch (Throwable ignored) {}
+        // 4. 旋转底座（不跟随旋转，稳定在机身上）
+        basePaint.setColor(0xFF14171F);
+        canvas.drawCircle(pivotX, pivotY, 15 * density, basePaint);
+        basePaint.setColor(0xFF2C3240);
+        canvas.drawCircle(pivotX, pivotY, 11 * density, basePaint);
+        basePaint.setColor(0xFF00E5FF);
+        canvas.drawCircle(pivotX, pivotY, 4 * density, basePaint);
     }
 }
