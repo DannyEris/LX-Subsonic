@@ -192,7 +192,6 @@
                             android:layout_marginLeft="6dp" />
                     </LinearLayout>
 
-                    <!-- 热门搜索推荐区域 -->
                     <LinearLayout
                         android:id="@+id/layout_hot_search_box"
                         android:layout_width="match_parent"
@@ -241,7 +240,6 @@
                         </HorizontalScrollView>
                     </LinearLayout>
 
-                    <!-- 搜索结果区域 -->
                     <LinearLayout
                         android:id="@+id/layout_search_result_box"
                         android:layout_width="match_parent"
@@ -384,7 +382,6 @@
                             android:layout_marginLeft="4dp" />
                     </LinearLayout>
 
-                    <!-- 二级排序栏与状态 -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="30dp"
@@ -418,7 +415,6 @@
                             android:visibility="gone" />
                     </LinearLayout>
 
-                    <!-- 歌单呈现容器：四方网格视图与列表视图 -->
                     <FrameLayout
                         android:id="@+id/layout_plaza_list_container"
                         android:layout_width="match_parent"
@@ -633,7 +629,7 @@
                         android:layout_marginTop="4dp" />
                 </LinearLayout>
 
-                <!-- 6. 设置页（修复：ScrollView 内部严格保留唯一的直接子 View） -->
+                <!-- 6. 设置页 -->
                 <ScrollView
                     android:id="@+id/layout_page_settings"
                     android:layout_width="match_parent"
@@ -775,7 +771,6 @@
                                 android:spinnerMode="dropdown" />
                         </LinearLayout>
 
-                        <!-- 歌单广场音质配置（安全收拢于主卡片内） -->
                         <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
@@ -958,7 +953,6 @@
                         android:textStyle="bold"
                         android:singleLine="true" />
 
-                    <!-- 底部缓冲进度提示 -->
                     <TextView
                         android:id="@+id/tv_bottom_buffer"
                         android:layout_width="wrap_content"
@@ -1315,7 +1309,6 @@
                         android:background="#16181d"
                         android:paddingLeft="10dp"
                         android:paddingRight="10dp" />
-                    <!-- 详情页缓冲进度提示 -->
                     <TextView
                         android:id="@+id/tv_detail_buffer"
                         android:layout_width="wrap_content"
@@ -1466,6 +1459,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginBottom="6dp">
+
                         <LinearLayout
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
@@ -1521,33 +1515,54 @@
                                 android:textSize="10sp"
                                 android:layout_marginLeft="4dp" />
                         </LinearLayout>
+
+                        <!-- 右侧控制区：字号调节 + 新增的手动切换歌词按钮 -->
                         <LinearLayout
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_alignParentRight="true"
                             android:layout_centerVertical="true"
-                            android:orientation="horizontal">
-                            <Button
-                                android:id="@+id/btn_lyric_dec"
+                            android:orientation="vertical"
+                            android:gravity="right">
+
+                            <LinearLayout
                                 android:layout_width="wrap_content"
-                                android:layout_height="30dp"
-                                android:background="@drawable/bg_btn_default"
-                                android:text="A-"
-                                android:textColor="#e0e0e0"
-                                android:textSize="11sp"
-                                android:paddingLeft="8dp"
-                                android:paddingRight="8dp" />
+                                android:layout_height="wrap_content"
+                                android:orientation="horizontal">
+                                <Button
+                                    android:id="@+id/btn_lyric_dec"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="30dp"
+                                    android:background="@drawable/bg_btn_default"
+                                    android:text="A-"
+                                    android:textColor="#e0e0e0"
+                                    android:textSize="11sp"
+                                    android:paddingLeft="8dp"
+                                    android:paddingRight="8dp" />
+                                <Button
+                                    android:id="@+id/btn_lyric_inc"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="30dp"
+                                    android:background="@drawable/bg_btn_default"
+                                    android:text="A+"
+                                    android:textColor="#e0e0e0"
+                                    android:textSize="11sp"
+                                    android:paddingLeft="8dp"
+                                    android:paddingRight="8dp"
+                                    android:layout_marginLeft="6dp" />
+                            </LinearLayout>
+
                             <Button
-                                android:id="@+id/btn_lyric_inc"
+                                android:id="@+id/btn_switch_lyric"
                                 android:layout_width="wrap_content"
-                                android:layout_height="30dp"
-                                android:background="@drawable/bg_btn_default"
-                                android:text="A+"
-                                android:textColor="#e0e0e0"
-                                android:textSize="11sp"
+                                android:layout_height="26dp"
+                                android:background="@drawable/bg_btn_pill_accent"
+                                android:text="切换歌词 ▾"
+                                android:textColor="#00e5ff"
+                                android:textSize="10sp"
                                 android:paddingLeft="8dp"
                                 android:paddingRight="8dp"
-                                android:layout_marginLeft="6dp" />
+                                android:layout_marginTop="4dp" />
                         </LinearLayout>
                     </RelativeLayout>
 
