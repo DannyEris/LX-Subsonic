@@ -11,7 +11,6 @@
     <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="120dp">
-        <!-- 歌单四方封面图片 -->
         <ImageView
             android:id="@+id/iv_grid_cover"
             android:layout_width="match_parent"
@@ -19,7 +18,6 @@
             android:scaleType="centerCrop"
             android:src="@drawable/ic_launcher" />
 
-        <!-- 播放量半透明浮层 -->
         <TextView
             android:id="@+id/tv_grid_playcount"
             android:layout_width="wrap_content"
@@ -32,10 +30,9 @@
             android:paddingRight="6dp"
             android:paddingTop="2dp"
             android:paddingBottom="2dp"
-            android:text="🎧 0" />
+            android:text="0" />
     </FrameLayout>
 
-    <!-- 歌单标题 -->
     <TextView
         android:id="@+id/tv_grid_title"
         android:layout_width="match_parent"
@@ -47,7 +44,6 @@
         android:ellipsize="end"
         android:text="歌单标题" />
 
-    <!-- 歌单作者/平台 -->
     <TextView
         android:id="@+id/tv_grid_author"
         android:layout_width="match_parent"
