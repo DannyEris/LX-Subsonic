@@ -39,7 +39,7 @@ public class LxApiHelper {
     public static final String[] PLAZA_PLATFORM_NAMES = new String[]{"QQ音乐", "网易云", "酷狗音乐", "酷我音乐", "咪咕音乐"};
     public static final String[] PLAZA_PLATFORM_CODES = new String[]{"tx", "wy", "kg", "kw", "mg"};
 
-    // 1. 各平台热搜词获取
+    // 1. 各平台热搜词获取（参照 lxserver / 各大平台官网热词接口）
     public static ArrayList<String> fetchHotSearch(String platform) {
         ArrayList<String> list = new ArrayList<String>();
         try {
@@ -47,7 +47,7 @@ public class LxApiHelper {
                 String res = httpGet("https://music.163.com/api/search/hot/get");
                 if (res != null) {
                     JSONArray hots = new JSONObject(res).getJSONObject("result").getJSONArray("hots");
-                    for (int i = 0; i < Math.min(hots.length(), 20); i++) {
+                    for (int i = 0; i < Math.min(hots.length(), 25); i++) {
                         list.add(hots.getJSONObject(i).getString("first"));
                     }
                 }
@@ -55,7 +55,7 @@ public class LxApiHelper {
                 String res = httpGet("http://mobilecdn.kugou.com/api/v3/search/hot");
                 if (res != null) {
                     JSONArray arr = new JSONObject(res).getJSONObject("data").getJSONArray("info");
-                    for (int i = 0; i < Math.min(arr.length(), 20); i++) {
+                    for (int i = 0; i < Math.min(arr.length(), 25); i++) {
                         list.add(arr.getJSONObject(i).getString("keyword"));
                     }
                 }
@@ -63,21 +63,34 @@ public class LxApiHelper {
                 String res = httpGet("http://kuwo.cn/api/www/search/searchKey");
                 if (res != null) {
                     JSONArray arr = new JSONObject(res).getJSONArray("data");
-                    for (int i = 0; i < Math.min(arr.length(), 20); i++) {
+                    for (int i = 0; i < Math.min(arr.length(), 25); i++) {
                         String s = arr.getString(i);
                         list.add(s.split("\r\n|\\n")[0]);
                     }
                 }
+            } else if ("mg".equalsIgnoreCase(platform)) {
+                String res = httpGet("https://c.musicapp.migu.cn/MIGUM2.0/v1.0/content/search_hot_info.do");
+                if (res != null) {
+                    JSONObject root = new JSONObject(res);
+                    if (root.has("hotSearchWord")) {
+                        JSONArray arr = root.getJSONArray("hotSearchWord");
+                        for (int i = 0; i < Math.min(arr.length(), 25); i++) {
+                            list.add(arr.getJSONObject(i).optString("word", ""));
+                        }
+                    }
+                }
             } else {
+                // 默认 QQ 音乐
                 String res = httpGet("https://c.y.qq.com/splcloud/fcgi-bin/gethotkey.fcg?g_tk=5381&format=json&inCharset=utf8&outCharset=utf-8&utf8=1");
                 if (res != null) {
                     JSONArray arr = new JSONObject(res).getJSONObject("data").getJSONArray("hotkey");
-                    for (int i = 0; i < Math.min(arr.length(), 20); i++) {
+                    for (int i = 0; i < Math.min(arr.length(), 25); i++) {
                         list.add(arr.getJSONObject(i).getString("k").trim());
                     }
                 }
             }
         } catch (Throwable ignored) {}
+
         if (list.isEmpty()) {
             list.add("周杰伦"); list.add("林俊杰"); list.add("陈奕迅"); list.add("邓紫棋");
             list.add("薛之谦"); list.add("告白气球"); list.add("七里香"); list.add("流行DJ");
@@ -85,55 +98,63 @@ public class LxApiHelper {
         return list;
     }
 
-    // 2. 歌单分类定义（对照各大官网实际分类）
+    // 2. 歌单分类定义（严格对齐各平台官网分类目录）
     public static Map<String, String[]> getPresetCategories(String platformCode) {
         Map<String, String[]> cat = new LinkedHashMap<String, String[]>();
         if ("wy".equals(platformCode)) {
             cat.put("热门", new String[]{"全部", "华语", "欧美", "流行", "摇滚", "民谣", "电子", "说唱"});
             cat.put("语种", new String[]{"华语", "欧美", "日语", "韩语", "粤语"});
-            cat.put("风格", new String[]{"流行", "摇滚", "民谣", "电子", "舞曲", "说唱", "轻音乐", "爵士", "古典", "古风", "ACG"});
-            cat.put("场景", new String[]{"清晨", "夜晚", "学习", "工作", "午休", "驾车", "运动", "旅行", "散步"});
-            cat.put("情感", new String[]{"怀旧", "清新", "浪漫", "伤感", "治愈", "放松", "孤独", "感动"});
-            cat.put("主题", new String[]{"影视原声", "ACG", "儿童", "校园", "经典", "翻唱", "吉他", "钢琴"});
+            cat.put("风格", new String[]{"流行", "摇滚", "民谣", "电子", "舞曲", "说唱", "轻音乐", "爵士", "古典", "古风", "ACG", "中国风"});
+            cat.put("场景", new String[]{"清晨", "夜晚", "学习", "工作", "午休", "驾车", "运动", "旅行", "散步", "酒吧"});
+            cat.put("情感", new String[]{"怀旧", "清新", "浪漫", "伤感", "治愈", "放松", "孤独", "感动", "快乐"});
+            cat.put("主题", new String[]{"影视原声", "ACG", "儿童", "校园", "经典", "翻唱", "吉他", "钢琴", "KTV"});
         } else if ("tx".equals(platformCode)) {
             cat.put("热门", new String[]{"全部", "官方歌单", "经典", "网络", "伤感", "情歌"});
             cat.put("语种", new String[]{"国语", "粤语", "英语", "韩语", "日语", "闽南语"});
-            cat.put("风格", new String[]{"流行", "摇滚", "民谣", "电子", "中国风", "轻音乐", "R&B"});
-            cat.put("场景", new String[]{"睡前", "夜店", "学习", "运动", "驾车", "工作", "咖啡馆"});
-            cat.put("主题", new String[]{"K歌金曲", "经典老歌", "影视原声", "ACG", "游戏", "DJ热歌"});
+            cat.put("风格", new String[]{"流行", "摇滚", "民谣", "电子", "中国风", "轻音乐", "R&B", "嘻哈", "爵士", "古典"});
+            cat.put("场景", new String[]{"睡前", "夜店", "学习", "运动", "驾车", "工作", "咖啡馆", "旅行", "派对"});
+            cat.put("情感", new String[]{"伤感", "治愈", "放松", "励志", "甜蜜", "寂寞", "思念"});
+            cat.put("主题", new String[]{"K歌金曲", "经典老歌", "影视原声", "ACG", "游戏", "DJ热歌", "网络热歌"});
         } else if ("kg".equals(platformCode)) {
             cat.put("热门", new String[]{"全部", "最热", "最新", "推荐", "飙升"});
-            cat.put("主题", new String[]{"KTV", "经典", "DJ", "网络热歌", "广场舞", "背景音乐"});
-            cat.put("语种", new String[]{"华语", "欧美", "粤语", "日韩", "闽南"});
-            cat.put("风格", new String[]{"流行", "电子", "摇滚", "民谣", "古风", "说唱"});
-            cat.put("心情", new String[]{"伤感", "治愈", "甜蜜", "欢快", "安静", "励志"});
+            cat.put("主题", new String[]{"KTV", "经典", "DJ", "网络热歌", "广场舞", "背景音乐", "胎教", "影视", "游戏", "动漫"});
+            cat.put("语种", new String[]{"华语", "欧美", "粤语", "日韩", "闽南", "小语种"});
+            cat.put("风格", new String[]{"流行", "电子", "摇滚", "民谣", "古风", "说唱", "轻音乐", "爵士", "古典", "R&B", "中国风"});
+            cat.put("心情", new String[]{"伤感", "治愈", "甜蜜", "欢快", "安静", "励志", "怀旧", "思念", "解压"});
+            cat.put("场景", new String[]{"夜晚", "运动", "驾车", "学习", "散步", "聚会", "咖啡厅"});
         } else if ("kw".equals(platformCode)) {
-            cat.put("热门", new String[]{"全部", "经典专区", "DJ专区", "影视专区", "车载专区"});
-            cat.put("主题", new String[]{"流行", "民谣", "网络", "摇滚", "BGM", "伴奏"});
-            cat.put("心情", new String[]{"伤感", "治愈", "励志", "开心", "思念", "怀旧"});
-            cat.put("场景", new String[]{"开车", "工作", "睡眠", "散步", "学习", "运动"});
-        } else {
-            cat.put("热门", new String[]{"全部", "华语经典", "热门流行", "精选"});
+            cat.put("热门", new String[]{"全部", "经典专区", "DJ专区", "影视专区", "车载专区", "网络专区"});
             cat.put("语种", new String[]{"华语", "欧美", "日韩", "粤语"});
-            cat.put("风格", new String[]{"流行", "摇滚", "民谣", "电子", "古风"});
-            cat.put("主题", new String[]{"影视原声", "网络歌曲", "K歌", "动漫"});
+            cat.put("风格", new String[]{"流行", "电子", "摇滚", "民谣", "古风", "轻音乐", "嘻哈", "爵士", "ACG", "舞曲"});
+            cat.put("心情", new String[]{"伤感", "治愈", "励志", "开心", "思念", "怀旧", "放松", "孤独", "感动"});
+            cat.put("场景", new String[]{"开车", "工作", "睡眠", "散步", "学习", "运动", "咖啡厅", "旅行"});
+            cat.put("主题", new String[]{"流行", "民谣", "网络", "摇滚", "BGM", "伴奏", "经典", "怀旧"});
+        } else {
+            cat.put("热门", new String[]{"全部", "华语经典", "热门流行", "精选", "原创"});
+            cat.put("语种", new String[]{"华语", "欧美", "日韩", "粤语", "纯音乐"});
+            cat.put("风格", new String[]{"流行", "摇滚", "民谣", "电子", "古风", "说唱", "爵士", "古典", "动漫"});
+            cat.put("主题", new String[]{"影视原声", "网络歌曲", "K歌", "动漫", "游戏", "经典老歌", "广场舞"});
+            cat.put("场景", new String[]{"运动", "驾车", "睡眠", "学习", "派对", "旅行", "工作"});
         }
         return cat;
     }
 
-    // QQ 音乐分类名与 categoryId 映射表
+    // QQ 音乐分类名与官方 categoryId 映射表
     private static final Map<String, Integer> QQ_CATEGORY_MAP = new HashMap<String, Integer>() {{
         put("全部", 10000000); put("官方歌单", 3317); put("经典", 59); put("网络", 28);
         put("伤感", 36); put("情歌", 39); put("国语", 165); put("粤语", 167);
         put("英语", 169); put("韩语", 170); put("日语", 171); put("闽南语", 172);
         put("流行", 6); put("摇滚", 11); put("民谣", 22); put("电子", 15);
-        put("中国风", 25); put("轻音乐", 21); put("R&B", 14); put("睡前", 44);
-        put("夜店", 51); put("学习", 42); put("运动", 49); put("驾车", 43);
-        put("工作", 41); put("咖啡馆", 46); put("K歌金曲", 71); put("经典老歌", 72);
-        put("影视原声", 74); put("ACG", 76); put("游戏", 77); put("DJ热歌", 81);
+        put("中国风", 25); put("轻音乐", 21); put("R&B", 14); put("嘻哈", 13);
+        put("爵士", 8); put("古典", 9); put("睡前", 44); put("夜店", 51);
+        put("学习", 42); put("运动", 49); put("驾车", 43); put("工作", 41);
+        put("咖啡馆", 46); put("旅行", 48); put("派对", 50); put("治愈", 38);
+        put("放松", 40); put("励志", 37); put("甜蜜", 39); put("寂寞", 35);
+        put("思念", 33); put("K歌金曲", 71); put("经典老歌", 72); put("影视原声", 74);
+        put("ACG", 76); put("游戏", 77); put("DJ热歌", 81); put("网络热歌", 28);
     }};
 
-    // 3. 歌单广场歌单列表获取（根据选择的平台与分类参数拉取官网真实数据）
+    // 3. 歌单广场歌单列表获取（支持分页 page：1, 2, 3...）
     public static ArrayList<PlaylistInfo> fetchPlaylists(String platform, String tag, int page) {
         ArrayList<PlaylistInfo> list = new ArrayList<PlaylistInfo>();
         try {
@@ -154,8 +175,9 @@ public class LxApiHelper {
                     }
                 }
             } else if ("kg".equalsIgnoreCase(platform)) {
-                String tagParam = (tag == null || tag.length() == 0 || "全部".equals(tag)) ? "" : ("&tagname=" + URLEncoder.encode(tag, "UTF-8"));
-                String url = "http://mobilecdn.kugou.com/api/v3/tag/specialList?pagesize=30&page=" + page + "&sort=2" + tagParam;
+                String sortParam = "最新".equals(tag) ? "sort=1" : "sort=2";
+                String tagParam = (tag == null || tag.length() == 0 || "全部".equals(tag) || "最新".equals(tag) || "最热".equals(tag)) ? "" : ("&tagname=" + URLEncoder.encode(tag, "UTF-8"));
+                String url = "http://mobilecdn.kugou.com/api/v3/tag/specialList?pagesize=30&page=" + page + "&" + sortParam + tagParam;
                 String res = httpGet(url);
                 if (res != null) {
                     JSONArray arr = new JSONObject(res).getJSONObject("data").getJSONArray("info");
@@ -222,7 +244,7 @@ public class LxApiHelper {
         return list;
     }
 
-    // 4. 歌单搜索
+    // 4. 歌单搜索（支持分页 page：1, 2, 3...）
     public static ArrayList<PlaylistInfo> searchPlaylists(String platform, String keyword, int page) {
         ArrayList<PlaylistInfo> list = new ArrayList<PlaylistInfo>();
         try {
@@ -263,7 +285,25 @@ public class LxApiHelper {
                                 String.valueOf(o.optLong("playcnt", 0)), "kw"));
                     }
                 }
+            } else if ("mg".equalsIgnoreCase(platform)) {
+                String url = "https://c.musicapp.migu.cn/MIGUM2.0/v1.0/content/search_all.do?text=" + encoded + "&pageNo=" + page + "&pageSize=30&searchSwitch=%7B%22songlist%22%3A1%7D";
+                String res = httpGet(url);
+                if (res != null) {
+                    JSONObject root = new JSONObject(res);
+                    if (root.has("songLists")) {
+                        JSONArray arr = root.getJSONArray("songLists");
+                        for (int i = 0; i < arr.length(); i++) {
+                            JSONObject o = arr.getJSONObject(i);
+                            list.add(new PlaylistInfo("mg_" + o.optString("id", ""),
+                                    o.optString("name", "咪咕歌单"),
+                                    o.optString("userNick", "咪咕音乐"),
+                                    o.optString("img", ""),
+                                    String.valueOf(o.optLong("playNum", 0)), "mg"));
+                        }
+                    }
+                }
             } else {
+                // 网易云
                 String url = "https://music.163.com/api/search/get?s=" + encoded + "&type=1000&limit=30&offset=" + ((page - 1) * 30);
                 String res = httpGet(url);
                 if (res != null) {
@@ -334,12 +374,38 @@ public class LxApiHelper {
                         songs.add(new MainActivity.DisplayEntry("tx_" + songmid, title, artist, artist + " [320K MP3]", null, "320K MP3", true, 320));
                     }
                 }
+            } else if (rawPlaylistId.startsWith("kw_")) {
+                String id = rawPlaylistId.substring(3);
+                String res = httpGet("http://nplserver.kuwo.cn/pl.s?content=list&id=" + id + "&pn=0&rn=100");
+                if (res != null) {
+                    JSONArray musiclist = new JSONObject(res).getJSONArray("musiclist");
+                    for (int i = 0; i < musiclist.length(); i++) {
+                        JSONObject o = musiclist.getJSONObject(i);
+                        String songId = o.getString("id");
+                        String title = o.getString("name");
+                        String artist = o.optString("artist", "酷我歌手");
+                        songs.add(new MainActivity.DisplayEntry("kw_" + songId, title, artist, artist + " [320K MP3]", null, "320K MP3", true, 320));
+                    }
+                }
+            } else if (rawPlaylistId.startsWith("mg_")) {
+                String id = rawPlaylistId.substring(3);
+                String res = httpGet("https://app.c.nf.migu.cn/MIGUM2.0/v1.0/user/queryMusicListSongs.do?musicListId=" + id + "&pageNo=1&pageSize=100");
+                if (res != null) {
+                    JSONArray listArr = new JSONObject(res).getJSONArray("list");
+                    for (int i = 0; i < listArr.length(); i++) {
+                        JSONObject o = listArr.getJSONObject(i);
+                        String songId = o.optString("songId", "");
+                        String title = o.optString("songName", "");
+                        String artist = o.optString("singerName", "咪咕歌手");
+                        songs.add(new MainActivity.DisplayEntry("mg_" + songId, title, artist, artist + " [320K MP3]", null, "320K MP3", true, 320));
+                    }
+                }
             }
         } catch (Throwable ignored) {}
         return songs;
     }
 
-    // 6. 各平台榜单 Key 映射
+    // 6. 各大平台官方榜单定义
     public static String[][] getPresetLeaderboards(String platformCode) {
         if ("wy".equals(platformCode)) {
             return new String[][]{
@@ -351,28 +417,30 @@ public class LxApiHelper {
         } else if ("tx".equals(platformCode)) {
             return new String[][]{
                 {"流行指数榜", "4"}, {"热歌榜", "26"}, {"新歌榜", "27"},
-                {"飙升榜", "62"}, {"说唱榜", "58"}, {"电音榜", "57"},
-                {"网络歌曲榜", "28"}, {"内地榜", "5"}, {"欧美榜", "3"},
-                {"香港地区榜", "59"}, {"韩国榜", "16"}, {"日本榜", "17"},
-                {"影视金曲榜", "29"}, {"国风热歌榜", "65"}, {"动漫音乐榜", "72"}
+                {"飙升榜", "62"}, {"网络歌曲榜", "28"}, {"内地榜", "5"},
+                {"欧美榜", "3"}, {"香港地区榜", "59"}, {"韩国榜", "16"},
+                {"日本榜", "17"}, {"影视金曲榜", "29"}, {"国风热歌榜", "65"},
+                {"动漫音乐榜", "72"}, {"说唱榜", "58"}, {"电音榜", "57"}
             };
         } else if ("kg".equals(platformCode)) {
             return new String[][]{
-                {"TOP500", "8888"}, {"飙升榜", "6666"}, {"蜂鸟流行音乐榜", "52144"},
-                {"网络红歌榜", "23784"}, {"说唱先锋榜", "46910"}, {"电音榜", "33161"},
-                {"内地榜", "31308"}, {"香港地区榜", "31310"}, {"欧美榜", "31313"},
-                {"民谣榜", "30972"}, {"日本榜", "31312"}, {"粤语金曲榜", "21101"}
+                {"TOP500", "8888"}, {"飙升榜", "6666"}, {"蜂鸟流行榜", "52144"},
+                {"网络红歌榜", "23784"}, {"国风新韵榜", "33161"}, {"内地榜", "31308"},
+                {"香港地区榜", "31310"}, {"欧美榜", "31313"}, {"民谣榜", "30972"},
+                {"日本榜", "31312"}, {"粤语金曲榜", "21101"}, {"韩国榜", "31311"},
+                {"电音榜", "33160"}, {"DJ热歌榜", "24971"}
             };
         } else if ("kw".equals(platformCode)) {
             return new String[][]{
                 {"酷我飙升榜", "93"}, {"酷我新歌榜", "17"}, {"酷我热歌榜", "16"},
                 {"网络歌曲榜", "158"}, {"抖音热歌榜", "145"}, {"影视金曲榜", "26"},
-                {"欧美榜", "13"}, {"日韩榜", "12"}
+                {"欧美榜", "13"}, {"日韩榜", "12"}, {"流行榜", "283"}, {"说唱榜", "284"}
             };
         } else {
             return new String[][]{
                 {"咪咕热歌榜", "27553319"}, {"咪咕新歌榜", "27186466"}, {"咪咕飙升榜", "27553258"},
-                {"影视金曲榜", "27553408"}, {"网络热歌榜", "27553380"}
+                {"影视金曲榜", "27553408"}, {"网络热歌榜", "27553380"}, {"欧美榜", "27553423"},
+                {"日韩榜", "27553435"}, {"国风榜", "27553450"}, {"说唱榜", "27553462"}
             };
         }
     }
@@ -429,11 +497,30 @@ public class LxApiHelper {
                         songs.add(new MainActivity.DisplayEntry("kw_" + id, title, artist, artist + " [320K MP3]", null, "320K MP3", true, 320));
                     }
                 }
+            } else if ("mg".equalsIgnoreCase(platform)) {
+                String url = "https://app.c.nf.migu.cn/MIGUM2.0/v1.0/content/queryContentbyId.do?columnId=" + boardKey + "&needAll=0";
+                String res = httpGet(url);
+                if (res != null) {
+                    JSONObject root = new JSONObject(res);
+                    if (root.has("columnInfo") && root.getJSONObject("columnInfo").has("contents")) {
+                        JSONArray arr = root.getJSONObject("columnInfo").getJSONArray("contents");
+                        for (int i = 0; i < arr.length(); i++) {
+                            JSONObject o = arr.getJSONObject(i).optJSONObject("objectInfo");
+                            if (o != null) {
+                                String songId = o.optString("songId", o.optString("contentId", ""));
+                                String title = o.optString("songName", o.optString("contentName", ""));
+                                String artist = o.optString("singerName", "咪咕歌手");
+                                songs.add(new MainActivity.DisplayEntry("mg_" + songId, title, artist, artist + " [320K MP3]", null, "320K MP3", true, 320));
+                            }
+                        }
+                    }
+                }
             }
         } catch (Throwable ignored) {}
         return songs;
     }
 
+    // 8. 具有智能编码探测和连接池的高性能 HTTP GET
     public static String httpGet(String urlStr) {
         HttpURLConnection conn = null;
         try {
