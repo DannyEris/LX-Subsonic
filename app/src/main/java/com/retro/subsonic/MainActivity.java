@@ -95,7 +95,8 @@ public class MainActivity extends Activity {
     private ArrayList<Map<String, String>> plazaPlaylistsData = new ArrayList<Map<String, String>>();
     private SimpleAdapter plazaPlaylistsAdapter;
     private PlazaGridAdapter plazaGridAdapter;
-    private String currentPlazaTag = "";
+    private String currentPlazaTagId = "";
+    private String currentPlazaTagName = "";
     private String currentPlazaSort = "最热";
     private int currentPlazaPage = 1;
     private boolean isLoadingPlaza = false;
@@ -184,7 +185,6 @@ public class MainActivity extends Activity {
     private Bitmap currentRawCoverBitmap, currentCircularCoverBitmap, currentBottomCoverBitmap;
     private Handler lyricHandler = new Handler();
 
-    // 内存图片缓存 (防 OOM 机制)
     private static LruCache<String, Bitmap> imageMemoryCache;
 
     private Handler dlnaSyncHandler = new Handler();
@@ -331,7 +331,6 @@ public class MainActivity extends Activity {
         isVinylDisplayMode = prefs.getBoolean("is_vinyl_display_mode", true);
         isPlazaGridMode = prefs.getBoolean("is_plaza_grid_mode", true);
 
-        // 初始化内存图片缓存，避免低配设备滑动图片 OOM
         if (imageMemoryCache == null) {
             int maxMemory = (int) (Runtime.getRuntime().maxMemory() / 1024);
             int cacheSize = Math.max(1024 * 4, maxMemory / 8);
@@ -436,7 +435,6 @@ public class MainActivity extends Activity {
         gvPlazaPlaylists = (GridView) findViewById(R.id.gv_plaza_playlists);
         lvPlazaPlaylists = (ListView) findViewById(R.id.lv_plaza_playlists);
 
-        // 广场分页加载 Footer
         footerPlazaLoading = new TextView(this);
         footerPlazaLoading.setText("点击或滑动加载下一页...");
         footerPlazaLoading.setGravity(Gravity.CENTER);
@@ -924,14 +922,15 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    // 歌单广场加载：支持刷新重载与分页加载更多
+    // 歌单广场加载：支持动态 ID/名称过滤、分页与双模式渲染
     private void loadPlazaSonglists(boolean isRefresh) {
         if (isLoadingPlaza) return;
         btnPlazaBack.setVisibility(View.GONE);
         isPlazaSearchMode = false;
         int pos = spinnerPlazaPlatform.getSelectedItemPosition();
         final String code = LxApiHelper.PLAZA_PLATFORM_CODES[pos >= 0 ? pos : 0];
-        final String tag = currentPlazaTag;
+        final String tagId = currentPlazaTagId;
+        final String tagName = currentPlazaTagName;
 
         if (isRefresh) {
             currentPlazaPage = 1;
@@ -946,13 +945,13 @@ public class MainActivity extends Activity {
             footerPlazaLoading.setText("正在加载第 " + currentPlazaPage + " 页...");
         }
 
-        tvPlazaCurrentTag.setText("当前分类: " + (tag.length() > 0 ? tag : "全部歌单") + " · " + currentPlazaSort + " (第 " + currentPlazaPage + " 页)");
+        tvPlazaCurrentTag.setText("当前分类: " + (tagName.length() > 0 ? tagName : "全部分类") + " · " + currentPlazaSort + " (第 " + currentPlazaPage + " 页)");
         isLoadingPlaza = true;
 
         new Thread(new Runnable() {
             @Override
             public void run() {
-                final ArrayList<LxApiHelper.PlaylistInfo> list = LxApiHelper.fetchPlaylists(code, tag, currentPlazaSort, currentPlazaPage);
+                final ArrayList<LxApiHelper.PlaylistInfo> list = LxApiHelper.fetchPlaylists(code, tagId, tagName, currentPlazaSort, currentPlazaPage);
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
@@ -1002,7 +1001,6 @@ public class MainActivity extends Activity {
         }
     }
 
-    // 歌单搜索：支持分页
     private void performPlazaSearch(final String keyword, boolean isRefresh) {
         if (keyword == null || keyword.trim().length() == 0) return;
         if (isLoadingPlaza) return;
@@ -1071,11 +1069,10 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    // 现代化卡片式分类选择弹窗 (对齐 Web 播放器设计风格)
+    // 现代化卡片式分类选择弹窗 (联网动态拉取各平台分类树，与 lxserver 严格对齐)
     private void showCategoryDialog() {
         int pos = spinnerPlazaPlatform.getSelectedItemPosition();
         final String code = LxApiHelper.PLAZA_PLATFORM_CODES[pos >= 0 ? pos : 0];
-        final Map<String, String[]> categories = LxApiHelper.getPresetCategories(code);
 
         final Dialog dialog = new Dialog(this);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
@@ -1090,89 +1087,115 @@ public class MainActivity extends Activity {
             @Override public void onClick(View v) { dialog.dismiss(); }
         });
 
-        LinearLayout layoutContent = (LinearLayout) dialogView.findViewById(R.id.layout_category_content);
+        final LinearLayout layoutContent = (LinearLayout) dialogView.findViewById(R.id.layout_category_content);
         layoutContent.removeAllViews();
         final float density = getResources().getDisplayMetrics().density;
 
-        // 1. 添加默认 "全部歌单" 按钮
-        TextView tvDefaultHeader = new TextView(this);
-        tvDefaultHeader.setText("默认分类");
-        tvDefaultHeader.setTextColor(0xFF888C99);
-        tvDefaultHeader.setTextSize(12);
-        tvDefaultHeader.setPadding(0, (int)(4 * density), 0, (int)(6 * density));
-        layoutContent.addView(tvDefaultHeader);
-
-        Button btnAll = new Button(this);
-        btnAll.setText("全部分类");
-        btnAll.setTextSize(12);
-        boolean isAllSelected = (currentPlazaTag == null || currentPlazaTag.length() == 0 || "全部".equals(currentPlazaTag));
-        btnAll.setTextColor(isAllSelected ? 0xFF10141A : 0xFFE0E0E0);
-        btnAll.setBackgroundResource(isAllSelected ? R.drawable.bg_category_tag_selected : R.drawable.bg_category_tag_normal);
-        btnAll.setPadding((int)(14 * density), 0, (int)(14 * density), 0);
-        LinearLayout.LayoutParams allLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, (int)(30 * density));
-        btnAll.setLayoutParams(allLp);
-        btnAll.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                currentPlazaTag = "";
-                btnPlazaCategory.setText("全部分类 ▾");
-                dialog.dismiss();
-                loadPlazaSonglists(true);
-            }
-        });
-        layoutContent.addView(btnAll);
-
-        // 2. 依次按大分类构建卡片徽章行
-        for (Map.Entry<String, String[]> entry : categories.entrySet()) {
-            TextView tvCatName = new TextView(this);
-            tvCatName.setText(entry.getKey());
-            tvCatName.setTextColor(0xFF00E5FF);
-            tvCatName.setTextSize(13);
-            tvCatName.setTypeface(null, Typeface.BOLD);
-            tvCatName.setPadding(0, (int)(12 * density), 0, (int)(6 * density));
-            layoutContent.addView(tvCatName);
-
-            String[] tags = entry.getValue();
-            LinearLayout rowLayout = null;
-            int countInRow = 0;
-
-            for (final String tName : tags) {
-                if (countInRow % 5 == 0) {
-                    rowLayout = new LinearLayout(this);
-                    rowLayout.setOrientation(LinearLayout.HORIZONTAL);
-                    LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                    rowLp.bottomMargin = (int)(6 * density);
-                    rowLayout.setLayoutParams(rowLp);
-                    layoutContent.addView(rowLayout);
-                }
-
-                final Button tBtn = new Button(this);
-                tBtn.setText(tName);
-                tBtn.setTextSize(11);
-                boolean isSelected = tName.equals(currentPlazaTag);
-                tBtn.setTextColor(isSelected ? 0xFF10141A : 0xFFCBD5E1);
-                tBtn.setBackgroundResource(isSelected ? R.drawable.bg_category_tag_selected : R.drawable.bg_category_tag_normal);
-                tBtn.setPadding((int)(10 * density), 0, (int)(10 * density), 0);
-                LinearLayout.LayoutParams tLp = new LinearLayout.LayoutParams(0, (int)(28 * density), 1.0f);
-                tLp.rightMargin = (int)(4 * density);
-                tBtn.setLayoutParams(tLp);
-                tBtn.setOnClickListener(new View.OnClickListener() {
-                    @Override public void onClick(View v) {
-                        currentPlazaTag = "全部".equals(tName) ? "" : tName;
-                        btnPlazaCategory.setText(tName + " ▾");
-                        dialog.dismiss();
-                        loadPlazaSonglists(true);
-                    }
-                });
-                if (rowLayout != null) rowLayout.addView(tBtn);
-                countInRow++;
-            }
-        }
+        // 默认显示正在拉取状态
+        final TextView tvLoading = new TextView(this);
+        tvLoading.setText("正在联网同步官方最新分类目录...");
+        tvLoading.setTextColor(0xFF00E5FF);
+        tvLoading.setTextSize(13);
+        tvLoading.setPadding(0, (int)(20 * density), 0, (int)(20 * density));
+        tvLoading.setGravity(Gravity.CENTER);
+        layoutContent.addView(tvLoading);
 
         if (dialog.getWindow() != null) {
             dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
             dialog.getWindow().setLayout((int) (520 * density), ViewGroup.LayoutParams.WRAP_CONTENT);
         }
         dialog.show();
+
+        // 异步请求各平台官方分类树
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final Map<String, ArrayList<LxApiHelper.CategoryTag>> categories = LxApiHelper.fetchDynamicCategories(code);
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (!dialog.isShowing()) return;
+                        layoutContent.removeAllViews();
+
+                        // 1. 添加 "默认分类 -> 全部分类" 按钮
+                        TextView tvDefaultHeader = new TextView(MainActivity.this);
+                        tvDefaultHeader.setText("默认分类");
+                        tvDefaultHeader.setTextColor(0xFF888C99);
+                        tvDefaultHeader.setTextSize(12);
+                        tvDefaultHeader.setPadding(0, (int)(4 * density), 0, (int)(6 * density));
+                        layoutContent.addView(tvDefaultHeader);
+
+                        Button btnAll = new Button(MainActivity.this);
+                        btnAll.setText("全部分类");
+                        btnAll.setTextSize(12);
+                        boolean isAllSelected = (currentPlazaTagId == null || currentPlazaTagId.length() == 0 || "全部".equals(currentPlazaTagId));
+                        btnAll.setTextColor(isAllSelected ? 0xFF10141A : 0xFFE0E0E0);
+                        btnAll.setBackgroundResource(isAllSelected ? R.drawable.bg_category_tag_selected : R.drawable.bg_category_tag_normal);
+                        btnAll.setPadding((int)(14 * density), 0, (int)(14 * density), 0);
+                        LinearLayout.LayoutParams allLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, (int)(30 * density));
+                        btnAll.setLayoutParams(allLp);
+                        btnAll.setOnClickListener(new View.OnClickListener() {
+                            @Override public void onClick(View v) {
+                                currentPlazaTagId = "";
+                                currentPlazaTagName = "";
+                                btnPlazaCategory.setText("全部分类 ▾");
+                                dialog.dismiss();
+                                loadPlazaSonglists(true);
+                            }
+                        });
+                        layoutContent.addView(btnAll);
+
+                        // 2. 依次按大分类构建卡片徽章行 (与官网完全一致)
+                        for (Map.Entry<String, ArrayList<LxApiHelper.CategoryTag>> entry : categories.entrySet()) {
+                            TextView tvCatName = new TextView(MainActivity.this);
+                            tvCatName.setText(entry.getKey());
+                            tvCatName.setTextColor(0xFF00E5FF);
+                            tvCatName.setTextSize(13);
+                            tvCatName.setTypeface(null, Typeface.BOLD);
+                            tvCatName.setPadding(0, (int)(12 * density), 0, (int)(6 * density));
+                            layoutContent.addView(tvCatName);
+
+                            ArrayList<LxApiHelper.CategoryTag> tags = entry.getValue();
+                            LinearLayout rowLayout = null;
+                            int countInRow = 0;
+
+                            for (final LxApiHelper.CategoryTag tag : tags) {
+                                if (countInRow % 5 == 0) {
+                                    rowLayout = new LinearLayout(MainActivity.this);
+                                    rowLayout.setOrientation(LinearLayout.HORIZONTAL);
+                                    LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                                    rowLp.bottomMargin = (int)(6 * density);
+                                    rowLayout.setLayoutParams(rowLp);
+                                    layoutContent.addView(rowLayout);
+                                }
+
+                                final Button tBtn = new Button(MainActivity.this);
+                                tBtn.setText(tag.name);
+                                tBtn.setTextSize(11);
+                                boolean isSelected = (tag.id != null && tag.id.equals(currentPlazaTagId)) || tag.name.equals(currentPlazaTagName);
+                                tBtn.setTextColor(isSelected ? 0xFF10141A : 0xFFCBD5E1);
+                                tBtn.setBackgroundResource(isSelected ? R.drawable.bg_category_tag_selected : R.drawable.bg_category_tag_normal);
+                                tBtn.setPadding((int)(10 * density), 0, (int)(10 * density), 0);
+                                LinearLayout.LayoutParams tLp = new LinearLayout.LayoutParams(0, (int)(28 * density), 1.0f);
+                                tLp.rightMargin = (int)(4 * density);
+                                tBtn.setLayoutParams(tLp);
+                                tBtn.setOnClickListener(new View.OnClickListener() {
+                                    @Override public void onClick(View v) {
+                                        currentPlazaTagId = tag.id;
+                                        currentPlazaTagName = tag.name;
+                                        btnPlazaCategory.setText(tag.name + " ▾");
+                                        dialog.dismiss();
+                                        loadPlazaSonglists(true);
+                                    }
+                                });
+                                if (rowLayout != null) rowLayout.addView(tBtn);
+                                countInRow++;
+                            }
+                        }
+                    }
+                });
+            }
+        }).start();
     }
 
     private void promptImportPlaylist() {
@@ -1249,24 +1272,44 @@ public class MainActivity extends Activity {
         }).start();
     }
 
+    // 动态拉取全平台完整官方排行榜 (20~43 个榜单)
     private void loadLeaderboardBoards() {
         int pos = spinnerRankingPlatform.getSelectedItemPosition();
         final String code = LxApiHelper.PLAZA_PLATFORM_CODES[pos >= 0 ? pos : 0];
-        final String[][] presetBoards = LxApiHelper.getPresetLeaderboards(code);
+        tvRankingBoardTitle.setText("正在联网获取官方榜单列表...");
 
         rankingBoardsList.clear();
         rankingBoardsData.clear();
-        for (String[] board : presetBoards) {
-            rankingBoardsList.add(new DisplayEntry(board[1], board[0], "", "榜单", null, "排行榜", false));
-            Map<String, String> row = new HashMap<String, String>();
-            row.put("title", board[0]);
-            rankingBoardsData.add(row);
-        }
         rankingBoardsAdapter.notifyDataSetChanged();
+        rankingSongsList.clear();
+        rankingSongsData.clear();
+        rankingSongsAdapter.notifyDataSetChanged();
 
-        if (!rankingBoardsList.isEmpty()) {
-            loadLeaderboardSongs(rankingBoardsList.get(0));
-        }
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final ArrayList<LxApiHelper.LeaderboardInfo> boards = LxApiHelper.fetchDynamicLeaderboards(code);
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        rankingBoardsList.clear();
+                        rankingBoardsData.clear();
+                        for (LxApiHelper.LeaderboardInfo b : boards) {
+                            rankingBoardsList.add(new DisplayEntry(b.id, b.name, "", "榜单", b.coverImg, "排行榜", false));
+                            Map<String, String> row = new HashMap<String, String>();
+                            row.put("title", b.name);
+                            rankingBoardsData.add(row);
+                        }
+                        rankingBoardsAdapter.notifyDataSetChanged();
+                        if (!rankingBoardsList.isEmpty()) {
+                            loadLeaderboardSongs(rankingBoardsList.get(0));
+                        } else {
+                            tvRankingBoardTitle.setText("暂无排行榜数据");
+                        }
+                    }
+                });
+            }
+        }).start();
     }
 
     private void loadLeaderboardSongs(final DisplayEntry board) {
@@ -1631,7 +1674,8 @@ public class MainActivity extends Activity {
         spinnerPlazaPlatform.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
             public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                currentPlazaTag = "";
+                currentPlazaTagId = "";
+                currentPlazaTagName = "";
                 btnPlazaCategory.setText("全部分类 ▾");
                 setupPlazaSortButtons();
                 loadPlazaSonglists(true);
@@ -1726,6 +1770,9 @@ public class MainActivity extends Activity {
         });
         btnPlazaRefresh.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
+                int pos = spinnerPlazaPlatform.getSelectedItemPosition();
+                String code = LxApiHelper.PLAZA_PLATFORM_CODES[pos >= 0 ? pos : 0];
+                LxApiHelper.clearCategoryCache(code);
                 if (isPlazaSearchMode) performPlazaSearch(currentPlazaSearchKeyword, true);
                 else loadPlazaSonglists(true);
             }
@@ -1813,7 +1860,12 @@ public class MainActivity extends Activity {
         gvPlazaPlaylists.setOnScrollListener(autoScrollLoader);
 
         btnRankingRefresh.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { loadLeaderboardBoards(); }
+            @Override public void onClick(View v) {
+                int pos = spinnerRankingPlatform.getSelectedItemPosition();
+                String code = LxApiHelper.PLAZA_PLATFORM_CODES[pos >= 0 ? pos : 0];
+                LxApiHelper.clearLeaderboardCache(code);
+                loadLeaderboardBoards();
+            }
         });
         lvRankingBoards.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             @Override
@@ -2410,6 +2462,759 @@ public class MainActivity extends Activity {
             if (musicDir != null) return musicDir.getAbsolutePath();
         } catch (Throwable ignored) {}
         return "/sdcard/Music";
+    }
+
+    private boolean isFav(String songId) { return songId != null && favSongIds.contains(songId); }
+    private void loadFavSet() { favSongIds = new HashSet<String>(prefs.getStringSet("fav_songs_set", new HashSet<String>())); }
+    private void saveFavSet() { prefs.edit().putStringSet("fav_songs_set", favSongIds).commit(); }
+
+    private void loadLocalPlaylists() {
+        featuredSongs.clear(); carSongs.clear();
+        try {
+            String fStr = prefs.getString("local_playlist_featured", "[]");
+            JSONArray fArr = new JSONArray(fStr);
+            for (int i = 0; i < fArr.length(); i++) {
+                JSONObject o = fArr.getJSONObject(i);
+                featuredSongs.add(new DisplayEntry(o.getString("id"), o.getString("title"), o.optString("artist", "未知歌手"), "", null, "本地", true));
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private void saveLocalPlaylists() {
+        try {
+            JSONArray fArr = new JSONArray();
+            for (DisplayEntry e : featuredSongs) {
+                JSONObject o = new JSONObject();
+                o.put("id", e.id); o.put("title", e.title); o.put("artist", e.artist);
+                fArr.put(o);
+            }
+            prefs.edit().putString("local_playlist_featured", fArr.toString()).commit();
+        } catch (Exception ignored) {}
+    }
+
+    private void setupControlIcons() {
+        int dark = 0xFF10141A, light = 0xFFE2E8F0, cyan = 0xFF00E5FF, red = 0xFFFF6B6B;
+        btnPrev.setImageDrawable(MediaIconHelper.createPreviousIcon(this, 18, light));
+        btnNext.setImageDrawable(MediaIconHelper.createNextIcon(this, 18, light));
+        btnPlayPause.setImageDrawable(MediaIconHelper.createPlayIcon(this, 22, dark));
+        btnDetailPrev.setImageDrawable(MediaIconHelper.createPreviousIcon(this, 22, light));
+        btnDetailNext.setImageDrawable(MediaIconHelper.createNextIcon(this, 22, light));
+        btnDetailPlayPause.setImageDrawable(MediaIconHelper.createPlayIcon(this, 28, dark));
+        btnExitApp.setImageDrawable(MediaIconHelper.createPowerIcon(this, 18, red));
+        btnDetailExitApp.setImageDrawable(MediaIconHelper.createPowerIcon(this, 18, red));
+        btnOpenEq.setImageDrawable(MediaIconHelper.createEqualizerIcon(this, 18, cyan));
+        btnDetailEq.setImageDrawable(MediaIconHelper.createEqualizerIcon(this, 20, cyan));
+        updateModeIcons(MusicService.getCurrentMode());
+    }
+
+    private void updateModeIcons(int mode) {
+        int color = 0xFF00E5FF;
+        if (mode == MusicService.MODE_SHUFFLE) {
+            btnMode.setImageDrawable(MediaIconHelper.createShuffleIcon(this, 18, color));
+            btnDetailMode.setImageDrawable(MediaIconHelper.createShuffleIcon(this, 20, color));
+        } else if (mode == MusicService.MODE_SINGLE) {
+            btnMode.setImageDrawable(MediaIconHelper.createRepeatOneIcon(this, 18, color));
+            btnDetailMode.setImageDrawable(MediaIconHelper.createRepeatOneIcon(this, 20, color));
+        } else {
+            btnMode.setImageDrawable(MediaIconHelper.createRepeatIcon(this, 18, color));
+            btnDetailMode.setImageDrawable(MediaIconHelper.createRepeatIcon(this, 20, color));
+        }
+    }
+
+    private void updatePlayPauseIcons(boolean isPlaying) {
+        int dark = 0xFF10141A;
+        btnPlayPause.setImageDrawable(isPlaying ? MediaIconHelper.createPauseIcon(this, 20, dark) : MediaIconHelper.createPlayIcon(this, 22, dark));
+        btnDetailPlayPause.setImageDrawable(isPlaying ? MediaIconHelper.createPauseIcon(this, 26, dark) : MediaIconHelper.createPlayIcon(this, 28, dark));
+    }
+
+    private void setupVinylAnimation() {
+        vinylRotateAnim = new RotateAnimation(0f, 360f, Animation.RELATIVE_TO_SELF, 0.5f, Animation.RELATIVE_TO_SELF, 0.5f);
+        vinylRotateAnim.setDuration(12000);
+        vinylRotateAnim.setRepeatCount(Animation.INFINITE);
+        vinylRotateAnim.setInterpolator(new LinearInterpolator());
+    }
+
+    private void updateVinylAnimationState() {
+        if (flVinylDisc == null) return;
+        if (isVinylDisplayMode && isCurrentSongPlaying) {
+            if (flVinylDisc.getAnimation() == null) flVinylDisc.startAnimation(vinylRotateAnim);
+        } else {
+            flVinylDisc.clearAnimation();
+        }
+    }
+
+    private void updateCoverDisplayMode() {
+        if (isVinylDisplayMode) {
+            layoutVinylContainer.setVisibility(View.VISIBLE);
+            ivSquareCover.setVisibility(View.GONE);
+            updateVinylAnimationState();
+        } else {
+            layoutVinylContainer.setVisibility(View.GONE);
+            if (flVinylDisc != null) flVinylDisc.clearAnimation();
+            ivSquareCover.setVisibility(View.VISIBLE);
+        }
+    }
+
+    private void toggleCoverDisplayMode() {
+        isVinylDisplayMode = !isVinylDisplayMode;
+        prefs.edit().putBoolean("is_vinyl_display_mode", isVinylDisplayMode).commit();
+        updateCoverDisplayMode();
+    }
+
+    private void toggleDetailQueueView() {
+        if (layoutDetailQueueView.getVisibility() == View.VISIBLE) {
+            layoutDetailQueueView.setVisibility(View.GONE);
+            layoutDetailLyricsView.setVisibility(View.VISIBLE);
+            btnDetailQueue.setText("队列");
+        } else {
+            refreshQueueList();
+            layoutDetailLyricsView.setVisibility(View.GONE);
+            layoutDetailQueueView.setVisibility(View.VISIBLE);
+            btnDetailQueue.setText("歌词");
+        }
+    }
+
+    private void loadSavedConfig() {
+        etServer.setText(prefs.getString("server", "http://192.168.1.100:4533"));
+        etUsername.setText(prefs.getString("user", "admin"));
+        etPassword.setText(prefs.getString("pass", "admin"));
+        etCacheSize.setText(prefs.getString("cache_size_mb", "500"));
+        etTimeoutSec.setText(prefs.getString("play_timeout_sec", "30"));
+        etRetryCount.setText(prefs.getString("play_retry_count", "3"));
+        etDownloadPath.setText(prefs.getString("download_path", getDefaultDownloadPath()));
+    }
+
+    private void saveConfig() {
+        prefs.edit()
+                .putString("server", etServer.getText().toString().trim())
+                .putString("user", etUsername.getText().toString().trim())
+                .putString("pass", etPassword.getText().toString().trim())
+                .putString("cache_size_mb", etCacheSize.getText().toString().trim())
+                .putString("play_timeout_sec", etTimeoutSec.getText().toString().trim())
+                .putString("play_retry_count", etRetryCount.getText().toString().trim())
+                .putString("download_path", etDownloadPath.getText().toString().trim())
+                .commit();
+    }
+
+    private void saveAndTestSettings() {
+        saveConfig();
+        Toast.makeText(this, "配置已保存，正在测试服务端...", Toast.LENGTH_SHORT).show();
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                String pingRes = requestApi("ping.view?" + getAuthParams());
+                final boolean success = pingRes != null && pingRes.contains("\"status\":\"ok\"");
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        Toast.makeText(MainActivity.this, success ? "服务器连接成功！" : "连接失败，请检查地址与密码", Toast.LENGTH_LONG).show();
+                        if (success) {
+                            fetchServerFavoritesQuietly();
+                            fetchHotSearchForCurrentPlatform();
+                        }
+                    }
+                });
+            }
+        }).start();
+    }
+
+    private void showSongLongClickMenu(final DisplayEntry entry, final int position) {
+        if (!entry.isSong) return;
+        final boolean fav = isFav(entry.id);
+        ArrayList<String> optList = new ArrayList<String>();
+        optList.add(fav ? "♥ 取消收藏" : "♡ 收藏到我的音乐");
+        optList.add("▶ 下一首播放");
+        optList.add("＋ 添加到播放队列");
+        optList.add("📁 收藏到歌单...");
+        optList.add("⬇ 下载歌曲文件");
+        if (currentPage == PAGE_FAV && currentActiveFavPlaylistId != null) {
+            optList.add("✕ 从当前列表移除");
+        }
+        final String[] options = optList.toArray(new String[0]);
+
+        new AlertDialog.Builder(this)
+                .setTitle(entry.title + " - " + entry.artist)
+                .setItems(options, new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        String opt = options[which];
+                        if (opt.contains("收藏到我的音乐") || opt.contains("取消收藏")) {
+                            serverStarSong(entry.id, !fav);
+                        } else if (opt.contains("下一首播放")) {
+                            insertNextToPlay(entry);
+                        } else if (opt.contains("添加到播放队列")) {
+                            addToPlayQueue(entry);
+                        } else if (opt.contains("收藏到歌单")) {
+                            showAddToPlaylistDialog(entry);
+                        } else if (opt.contains("下载歌曲文件")) {
+                            downloadSongItem(entry);
+                        } else if (opt.contains("从当前列表移除")) {
+                            removeFromCurrentView(position, entry);
+                        }
+                    }
+                })
+                .show();
+    }
+
+    private void insertNextToPlay(DisplayEntry entry) {
+        ArrayList<MusicService.SongItem> queue = MusicService.getPlaylist();
+        int curIdx = MusicService.getCurrentIndex();
+        String playUrl;
+        if (entry.localPath != null && entry.localPath.length() > 0) {
+            playUrl = "file://" + entry.localPath;
+        } else if (entry.id != null && entry.id.startsWith("local_file:")) {
+            playUrl = "file://" + entry.id.substring(11);
+        } else {
+            playUrl = buildStreamUrl(entry.id, getSavedBitrate());
+        }
+        MusicService.SongItem item = new MusicService.SongItem(entry.id, entry.title, entry.artist, playUrl, entry.coverArt, entry.quality);
+        if (queue.isEmpty() || curIdx < 0) {
+            queue.add(item);
+            MusicService.setQueue(queue, 0, this);
+        } else {
+            queue.add(curIdx + 1, item);
+        }
+        refreshQueueList();
+        Toast.makeText(this, "已加入下一首播放: " + entry.title, Toast.LENGTH_SHORT).show();
+    }
+
+    private void addToPlayQueue(DisplayEntry entry) {
+        ArrayList<MusicService.SongItem> queue = MusicService.getPlaylist();
+        String playUrl;
+        if (entry.localPath != null && entry.localPath.length() > 0) {
+            playUrl = "file://" + entry.localPath;
+        } else if (entry.id != null && entry.id.startsWith("local_file:")) {
+            playUrl = "file://" + entry.id.substring(11);
+        } else {
+            playUrl = buildStreamUrl(entry.id, getSavedBitrate());
+        }
+        MusicService.SongItem item = new MusicService.SongItem(entry.id, entry.title, entry.artist, playUrl, entry.coverArt, entry.quality);
+        if (queue.isEmpty()) {
+            queue.add(item);
+            MusicService.setQueue(queue, 0, this);
+        } else {
+            queue.add(item);
+        }
+        refreshQueueList();
+        Toast.makeText(this, "已添加到播放队列末尾: " + entry.title, Toast.LENGTH_SHORT).show();
+    }
+
+    private void showPlaylistLongClickMenu(final DisplayEntry playlistEntry) {
+        boolean isPlatformPlazaPlaylist = playlistEntry.id.startsWith("tx_") || playlistEntry.id.startsWith("wy_")
+                || playlistEntry.id.startsWith("kg_") || playlistEntry.id.startsWith("kw_") || playlistEntry.id.startsWith("mg_");
+        boolean isLocalFixedPlaylist = "fav_entry".equals(playlistEntry.id) || "local_featured".equals(playlistEntry.id)
+                || "local_car".equals(playlistEntry.id);
+
+        ArrayList<String> optList = new ArrayList<String>();
+        optList.add("▶ 播放全部歌曲");
+        optList.add("＋ 添加全部到播放队列");
+
+        if (isPlatformPlazaPlaylist) {
+            optList.add("⭐ 收藏歌单 (添加到我的歌单)");
+        } else if (!isLocalFixedPlaylist) {
+            optList.add("✏ 重命名歌单");
+            optList.add("🗑 删除歌单");
+        }
+
+        final String[] options = optList.toArray(new String[0]);
+        new AlertDialog.Builder(this)
+                .setTitle("歌单操作: " + playlistEntry.title)
+                .setItems(options, new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        String opt = options[which];
+                        if (opt.contains("播放全部歌曲")) {
+                            playAllFromPlaylist(playlistEntry);
+                        } else if (opt.contains("添加全部到播放队列")) {
+                            addAllToQueueFromPlaylist(playlistEntry);
+                        } else if (opt.contains("收藏歌单")) {
+                            bookmarkPlazaPlaylist(playlistEntry);
+                        } else if (opt.contains("重命名歌单")) {
+                            promptRenamePlaylist(playlistEntry);
+                        } else if (opt.contains("删除歌单")) {
+                            promptDeletePlaylist(playlistEntry);
+                        }
+                    }
+                })
+                .show();
+    }
+
+    private void bookmarkPlazaPlaylist(final DisplayEntry playlistEntry) {
+        Toast.makeText(this, "正在拉取全量歌曲并导入歌单...", Toast.LENGTH_SHORT).show();
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    final ArrayList<DisplayEntry> songs = LxApiHelper.fetchPlaylistSongs(playlistEntry.id);
+                    String plName = "【收藏】" + playlistEntry.title;
+                    String createParam = "name=" + URLEncoder.encode(plName, "UTF-8");
+                    String res = requestApi("createPlaylist.view?" + createParam + "&" + getAuthParams());
+                    String newPlId = null;
+                    if (res != null) {
+                        JSONObject root = new JSONObject(res).getJSONObject("subsonic-response");
+                        JSONObject pl = root.optJSONObject("playlist");
+                        if (pl != null) newPlId = pl.optString("id");
+                    }
+                    if (newPlId != null && !songs.isEmpty()) {
+                        for (DisplayEntry s : songs) {
+                            String addParam = "playlistId=" + URLEncoder.encode(newPlId, "UTF-8") + "&songIdToAdd=" + URLEncoder.encode(s.id, "UTF-8");
+                            requestApi("updatePlaylist.view?" + addParam + "&" + getAuthParams());
+                        }
+                    }
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            Toast.makeText(MainActivity.this, "已成功收藏到「我的收藏与歌单」！", Toast.LENGTH_SHORT).show();
+                            fetchServerPlaylistsQuietly();
+                        }
+                    });
+                } catch (Exception ignored) {}
+            }
+        }).start();
+    }
+
+    private void playAllFromPlaylist(final DisplayEntry pl) {
+        Toast.makeText(this, "正在载入全部歌曲...", Toast.LENGTH_SHORT).show();
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final ArrayList<DisplayEntry> songs;
+                if ("fav_entry".equals(pl.id)) {
+                    songs = new ArrayList<DisplayEntry>();
+                    for (DisplayEntry s : favPlaylistsList) if (s.isSong) songs.add(s);
+                } else if (pl.id.startsWith("tx_") || pl.id.startsWith("wy_") || pl.id.startsWith("kg_") || pl.id.startsWith("kw_") || pl.id.startsWith("mg_")) {
+                    songs = LxApiHelper.fetchPlaylistSongs(pl.id);
+                } else if ("local_featured".equals(pl.id)) {
+                    songs = featuredSongs;
+                } else if ("local_car".equals(pl.id)) {
+                    songs = carSongs;
+                } else {
+                    songs = fetchSongsForSubsonicPlaylistSync(pl.id);
+                }
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (songs != null && !songs.isEmpty()) {
+                            playSongInList(songs, songs.get(0));
+                            Toast.makeText(MainActivity.this, "开始播放: " + pl.title, Toast.LENGTH_SHORT).show();
+                        } else {
+                            Toast.makeText(MainActivity.this, "未能获取到歌曲列表", Toast.LENGTH_SHORT).show();
+                        }
+                    }
+                });
+            }
+        }).start();
+    }
+
+    private void addAllToQueueFromPlaylist(final DisplayEntry pl) {
+        Toast.makeText(this, "正在将歌曲加入队列...", Toast.LENGTH_SHORT).show();
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final ArrayList<DisplayEntry> songs;
+                if ("fav_entry".equals(pl.id)) {
+                    songs = new ArrayList<DisplayEntry>();
+                    for (DisplayEntry s : favPlaylistsList) if (s.isSong) songs.add(s);
+                } else if (pl.id.startsWith("tx_") || pl.id.startsWith("wy_") || pl.id.startsWith("kg_") || pl.id.startsWith("kw_") || pl.id.startsWith("mg_")) {
+                    songs = LxApiHelper.fetchPlaylistSongs(pl.id);
+                } else if ("local_featured".equals(pl.id)) {
+                    songs = featuredSongs;
+                } else if ("local_car".equals(pl.id)) {
+                    songs = carSongs;
+                } else {
+                    songs = fetchSongsForSubsonicPlaylistSync(pl.id);
+                }
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (songs != null && !songs.isEmpty()) {
+                            ArrayList<MusicService.SongItem> q = MusicService.getPlaylist();
+                            for (DisplayEntry s : songs) {
+                                String pUrl;
+                                if (s.localPath != null && s.localPath.length() > 0) {
+                                    pUrl = "file://" + s.localPath;
+                                } else if (s.id != null && s.id.startsWith("local_file:")) {
+                                    pUrl = "file://" + s.id.substring(11);
+                                } else {
+                                    pUrl = buildStreamUrl(s.id, getSavedBitrate());
+                                }
+                                q.add(new MusicService.SongItem(s.id, s.title, s.artist, pUrl, s.coverArt, s.quality));
+                            }
+                            refreshQueueList();
+                            Toast.makeText(MainActivity.this, "已添加 " + songs.size() + " 首歌到播放队列", Toast.LENGTH_SHORT).show();
+                        }
+                    }
+                });
+            }
+        }).start();
+    }
+
+    private ArrayList<DisplayEntry> fetchSongsForSubsonicPlaylistSync(String plId) {
+        ArrayList<DisplayEntry> resList = new ArrayList<DisplayEntry>();
+        ArrayList<Map<String, String>> dummy = new ArrayList<Map<String, String>>();
+        try {
+            boolean isAlbum = plId.startsWith("album_");
+            String actualId = isAlbum ? plId.substring(6) : plId;
+            String endpoint = isAlbum ? ("getAlbum.view?id=" + URLEncoder.encode(actualId, "UTF-8"))
+                    : ("getPlaylist.view?id=" + URLEncoder.encode(actualId, "UTF-8"));
+            String res = requestApi(endpoint + "&" + getAuthParams());
+            if (res != null) {
+                JSONObject root = new JSONObject(res).getJSONObject("subsonic-response");
+                JSONObject pl = isAlbum ? root.optJSONObject("album") : root.optJSONObject("playlist");
+                if (pl != null) {
+                    String songKey = isAlbum ? "song" : "entry";
+                    if (pl.has(songKey)) {
+                        Object obj = pl.get(songKey);
+                        if (obj instanceof JSONArray) {
+                            JSONArray arr = (JSONArray) obj;
+                            for (int i = 0; i < arr.length(); i++) addSongRow(arr.getJSONObject(i), resList, dummy);
+                        } else if (obj instanceof JSONObject) {
+                            addSongRow((JSONObject) obj, resList, dummy);
+                        }
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+        return resList;
+    }
+
+    private void promptCreatePlaylist() {
+        final EditText input = new EditText(this);
+        input.setHint("输入歌单名称...");
+        input.setTextColor(0xFFFFFFFF);
+        new AlertDialog.Builder(this)
+                .setTitle("新建歌单")
+                .setView(input)
+                .setPositiveButton("创建", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        String name = input.getText().toString().trim();
+                        if (name.length() > 0) createNewServerPlaylist(name);
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void createNewServerPlaylist(final String playlistName) {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    String param = "name=" + URLEncoder.encode(playlistName, "UTF-8");
+                    requestApi("createPlaylist.view?" + param + "&" + getAuthParams());
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            Toast.makeText(MainActivity.this, "歌单创建成功", Toast.LENGTH_SHORT).show();
+                            showFavAndCustomPlaylists();
+                        }
+                    });
+                } catch (Exception ignored) {}
+            }
+        }).start();
+    }
+
+    private void promptRenamePlaylist(final DisplayEntry playlistEntry) {
+        final EditText input = new EditText(this);
+        input.setText(playlistEntry.title);
+        input.setTextColor(0xFFFFFFFF);
+        new AlertDialog.Builder(this)
+                .setTitle("重命名歌单")
+                .setView(input)
+                .setPositiveButton("保存", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        String newName = input.getText().toString().trim();
+                        if (newName.length() > 0) renameServerPlaylist(playlistEntry.id, newName);
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void renameServerPlaylist(final String playlistId, final String newName) {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    String param = "playlistId=" + URLEncoder.encode(playlistId, "UTF-8") + "&name=" + URLEncoder.encode(newName, "UTF-8");
+                    requestApi("updatePlaylist.view?" + param + "&" + getAuthParams());
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() { showFavAndCustomPlaylists(); }
+                    });
+                } catch (Exception ignored) {}
+            }
+        }).start();
+    }
+
+    private void promptDeletePlaylist(final DisplayEntry playlistEntry) {
+        new AlertDialog.Builder(this)
+                .setTitle("确认删除歌单")
+                .setMessage("是否确认删除歌单 \"" + playlistEntry.title + "\"？")
+                .setPositiveButton("删除", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        deleteServerPlaylist(playlistEntry.id);
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void deleteServerPlaylist(final String playlistId) {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    String param = "id=" + URLEncoder.encode(playlistId, "UTF-8");
+                    requestApi("deletePlaylist.view?" + param + "&" + getAuthParams());
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() { showFavAndCustomPlaylists(); }
+                    });
+                } catch (Exception ignored) {}
+            }
+        }).start();
+    }
+
+    private void showAddToPlaylistDialog(final DisplayEntry entry) {
+        final ArrayList<String> names = new ArrayList<String>();
+        final ArrayList<String> ids = new ArrayList<String>();
+        names.add("★ 我喜欢的音乐"); ids.add("ACTION_FAV");
+        names.add("📁 精选本地歌单"); ids.add("LOCAL_FEATURED");
+        names.add("🚗 车载音乐歌单"); ids.add("LOCAL_CAR");
+        for (DisplayEntry pl : rawServerUserPlaylists) {
+            names.add("☁ " + pl.title); ids.add(pl.id);
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("选择要加入的歌单")
+                .setItems(names.toArray(new String[0]), new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        String targetId = ids.get(which);
+                        if ("ACTION_FAV".equals(targetId)) {
+                            serverStarSong(entry.id, true);
+                        } else if ("LOCAL_FEATURED".equals(targetId)) {
+                            featuredSongs.add(entry); saveLocalPlaylists();
+                            Toast.makeText(MainActivity.this, "已加入精选本地歌单", Toast.LENGTH_SHORT).show();
+                        } else if ("LOCAL_CAR".equals(targetId)) {
+                            carSongs.add(entry); saveLocalPlaylists();
+                            Toast.makeText(MainActivity.this, "已加入车载歌单", Toast.LENGTH_SHORT).show();
+                        } else {
+                            addSongToServerPlaylist(targetId, entry.id, names.get(which));
+                        }
+                    }
+                })
+                .show();
+    }
+
+    private void addSongToServerPlaylist(final String playlistId, final String songId, final String plName) {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    String param = "playlistId=" + URLEncoder.encode(playlistId, "UTF-8") + "&songIdToAdd=" + URLEncoder.encode(songId, "UTF-8");
+                    requestApi("updatePlaylist.view?" + param + "&" + getAuthParams());
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            Toast.makeText(MainActivity.this, "已添加到 " + plName, Toast.LENGTH_SHORT).show();
+                        }
+                    });
+                } catch (Exception ignored) {}
+            }
+        }).start();
+    }
+
+    private void removeFromCurrentView(int position, DisplayEntry entry) {
+        if (currentPage == PAGE_FAV && currentActiveFavPlaylistId != null) {
+            if ("fav_entry".equals(currentActiveFavPlaylistId)) {
+                serverStarSong(entry.id, false);
+            }
+            if (position >= 0 && position < favPlaylistsList.size()) {
+                favPlaylistsList.remove(position);
+                favPlaylistsData.remove(position);
+                favPlaylistsAdapter.notifyDataSetChanged();
+                Toast.makeText(this, "已从列表中移除", Toast.LENGTH_SHORT).show();
+            }
+        }
+    }
+
+    private void downloadSongItem(final DisplayEntry entry) {
+        String customPath = prefs.getString("download_path", getDefaultDownloadPath());
+        final File saveDir = new File(customPath);
+        if (!saveDir.exists()) saveDir.mkdirs();
+        final String fileName = sanitizeFileName(entry.title + " - " + entry.artist) + ".mp3";
+        final File targetFile = new File(saveDir, fileName);
+        Toast.makeText(this, "开始下载: " + entry.title, Toast.LENGTH_SHORT).show();
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                if (CacheManager.isSongCached(MainActivity.this, entry.id)) {
+                    File cachedFile = CacheManager.getSongFile(MainActivity.this, entry.id);
+                    if (copyFile(cachedFile, targetFile)) {
+                        runOnUiThread(new Runnable() {
+                            @Override public void run() {
+                                Toast.makeText(MainActivity.this, "下载完成: " + targetFile.getAbsolutePath(), Toast.LENGTH_LONG).show();
+                            }
+                        });
+                        return;
+                    }
+                }
+                try {
+                    String initialUrl;
+                    if (entry.localPath != null && entry.localPath.length() > 0) {
+                        initialUrl = "file://" + entry.localPath;
+                    } else if (entry.id != null && entry.id.startsWith("local_file:")) {
+                        initialUrl = "file://" + entry.id.substring(11);
+                    } else {
+                        initialUrl = buildStreamUrl(entry.id);
+                    }
+                    boolean ok = downloadWithRedirects(initialUrl, targetFile, 0);
+                    if (ok && CacheManager.isValidAudioFile(targetFile)) {
+                        runOnUiThread(new Runnable() {
+                            @Override public void run() {
+                                Toast.makeText(MainActivity.this, "下载完成:\n" + targetFile.getAbsolutePath(), Toast.LENGTH_LONG).show();
+                            }
+                        });
+                    }
+                } catch (Exception ignored) {}
+            }
+        }).start();
+    }
+
+    private boolean copyFile(File src, File dest) {
+        try {
+            FileInputStream fis = new FileInputStream(src);
+            FileOutputStream fos = new FileOutputStream(dest);
+            byte[] buf = new byte[8192];
+            int len;
+            while ((len = fis.read(buf)) != -1) fos.write(buf, 0, len);
+            fos.flush(); fos.close(); fis.close();
+            return true;
+        } catch (Exception e) { return false; }
+    }
+
+    private boolean downloadWithRedirects(String targetUrl, File destFile, int depth) throws Exception {
+        if (depth > 6) return false;
+        URL url = new URL(targetUrl);
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        conn.setInstanceFollowRedirects(false);
+        conn.setConnectTimeout(8000);
+        conn.setReadTimeout(20000);
+        if (conn instanceof HttpsURLConnection) {
+            ((HttpsURLConnection) conn).setSSLSocketFactory(new TLSSocketFactory());
+        }
+        int code = conn.getResponseCode();
+        if (code == 301 || code == 302 || code == 303 || code == 307) {
+            String location = conn.getHeaderField("Location");
+            conn.disconnect();
+            if (location != null && location.length() > 0) {
+                return downloadWithRedirects(new URL(url, location).toString(), destFile, depth + 1);
+            }
+            return false;
+        }
+        if (code == 200 || code == 206) {
+            InputStream is = conn.getInputStream();
+            FileOutputStream fos = new FileOutputStream(destFile);
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = is.read(buf)) != -1) fos.write(buf, 0, n);
+            fos.flush(); fos.close(); is.close();
+            conn.disconnect();
+            return true;
+        }
+        conn.disconnect();
+        return false;
+    }
+
+    private String sanitizeFileName(String name) {
+        return name.replaceAll("[\\\\/:*?\"<>|]", "_").trim();
+    }
+
+    private void refreshQueueList() {
+        ArrayList<MusicService.SongItem> list = MusicService.getPlaylist();
+        int currentPlaying = MusicService.getCurrentIndex();
+        queueData.clear();
+        for (int i = 0; i < list.size(); i++) {
+            MusicService.SongItem item = list.get(i);
+            Map<String, String> row = new HashMap<String, String>();
+            row.put("title", (i == currentPlaying ? "▶ " : "   ") + (i + 1) + ". " + item.title);
+            row.put("subtitle", item.artist);
+            queueData.add(row);
+        }
+        queueAdapter.notifyDataSetChanged();
+        detailQueueAdapter.notifyDataSetChanged();
+    }
+
+    private void updateFavButtonState(String currentPlayingSongId) {
+        String targetId = currentPlayingSongId;
+        if (targetId == null) {
+            ArrayList<MusicService.SongItem> q = MusicService.getPlaylist();
+            int idx = MusicService.getCurrentIndex();
+            if (q != null && idx >= 0 && idx < q.size()) targetId = q.get(idx).id;
+        }
+        boolean fav = isFav(targetId);
+        String symbol = fav ? "♥" : "♡";
+        if (btnBottomFav != null) btnBottomFav.setText(symbol);
+        if (btnDetailFav != null) btnDetailFav.setText(symbol);
+    }
+
+    private void serverStarSong(final String songId, final boolean toStar) {
+        if (songId == null) return;
+        if (toStar) {
+            favSongIds.add(songId);
+            Toast.makeText(this, "已添加到「我喜欢的音乐」", Toast.LENGTH_SHORT).show();
+        } else {
+            favSongIds.remove(songId);
+            Toast.makeText(this, "已从「我喜欢的音乐」中移除", Toast.LENGTH_SHORT).show();
+        }
+        saveFavSet();
+        updateFavButtonState(songId);
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    String endpoint = toStar ? "star.view" : "unstar.view";
+                    requestApi(endpoint + "?id=" + URLEncoder.encode(songId, "UTF-8") + "&" + getAuthParams());
+                } catch (Exception ignored) {}
+            }
+        }).start();
+    }
+
+    private void fetchServerFavoritesQuietly() {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                String jsonStr = requestApi("getStarred2.view?" + getAuthParams());
+                if (jsonStr == null) jsonStr = requestApi("getStarred.view?" + getAuthParams());
+                if (jsonStr != null) {
+                    try {
+                        JSONObject root = new JSONObject(jsonStr).getJSONObject("subsonic-response");
+                        JSONObject starred = root.optJSONObject("starred2");
+                        if (starred == null) starred = root.optJSONObject("starred");
+                        if (starred != null && starred.has("song")) {
+                            favSongIds.clear();
+                            Object songObj = starred.get("song");
+                            if (songObj instanceof JSONArray) {
+                                JSONArray arr = (JSONArray) songObj;
+                                for (int i = 0; i < arr.length(); i++) favSongIds.add(arr.getJSONObject(i).getString("id"));
+                            } else if (songObj instanceof JSONObject) {
+                                favSongIds.add(((JSONObject) songObj).getString("id"));
+                            }
+                            saveFavSet();
+                            runOnUiThread(new Runnable() {
+                                @Override
+                                public void run() { updateFavButtonState(null); }
+                            });
+                        }
+                    } catch (Exception ignored) {}
+                }
+            }
+        }).start();
     }
 
     private boolean isFav(String songId) { return songId != null && favSongIds.contains(songId); }
