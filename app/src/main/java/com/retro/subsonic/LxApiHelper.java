@@ -17,7 +17,7 @@ import javax.net.ssl.HttpsURLConnection;
 
 public class LxApiHelper {
 
-    // 歌单基本模型
+    // 歌单基本模型[cite: 1]
     public static class PlaylistInfo {
         public String id;
         public String name;
@@ -36,7 +36,7 @@ public class LxApiHelper {
         }
     }
 
-    // 动态分类标签模型 (精准对应各平台的 categoryId/tagId 与显示名称)
+    // 动态分类标签模型 (精准对应各平台的 categoryId/tagId 与显示名称)[cite: 1]
     public static class CategoryTag {
         public String name;
         public String id;
@@ -47,7 +47,7 @@ public class LxApiHelper {
         }
     }
 
-    // 动态排行榜模型 (精准对应官方 25~43 个榜单的真实 sourceid/topId)
+    // 动态排行榜模型 (精准对应官方各榜单的真实 sourceid/topId)[cite: 1]
     public static class LeaderboardInfo {
         public String id;
         public String name;
@@ -66,7 +66,7 @@ public class LxApiHelper {
     public static final String[] PLAZA_PLATFORM_NAMES = new String[]{"QQ音乐", "网易云", "酷狗音乐", "酷我音乐", "咪咕音乐"};
     public static final String[] PLAZA_PLATFORM_CODES = new String[]{"tx", "wy", "kg", "kw", "mg"};
 
-    // 内存二级缓存：避免每次打开弹窗都重复网络请求，提升老设备响应速度
+    // 内存二级缓存：避免每次打开弹窗都重复网络请求，提升老旧 x86 设备的响应速度[cite: 1]
     private static final Map<String, Map<String, ArrayList<CategoryTag>>> CATEGORY_CACHE = new HashMap<String, Map<String, ArrayList<CategoryTag>>>();
     private static final Map<String, ArrayList<LeaderboardInfo>> LEADERBOARD_CACHE = new HashMap<String, ArrayList<LeaderboardInfo>>();
 
@@ -80,7 +80,7 @@ public class LxApiHelper {
         else LEADERBOARD_CACHE.remove(platform.toLowerCase());
     }
 
-    // 1. 各大平台实时热门搜索词抓取
+    // 1. 各大平台实时热门搜索词抓取[cite: 1]
     public static ArrayList<String> fetchHotSearch(String platform) {
         ArrayList<String> list = new ArrayList<String>();
         try {
@@ -121,7 +121,7 @@ public class LxApiHelper {
                     }
                 }
             } else {
-                // QQ音乐官方实时热词
+                // QQ音乐官方实时热词[cite: 1]
                 String res = httpGet("https://c.y.qq.com/splcloud/fcgi-bin/gethotkey.fcg?g_tk=5381&format=json&inCharset=utf8&outCharset=utf-8&utf8=1");
                 if (res != null) {
                     JSONArray arr = new JSONObject(res).getJSONObject("data").getJSONArray("hotkey");
@@ -139,7 +139,7 @@ public class LxApiHelper {
         return list;
     }
 
-    // 2. 官方排序方式
+    // 2. 官方排序方式[cite: 1]
     public static String[] getPlatformSorts(String platformCode) {
         if ("kg".equals(platformCode)) {
             return new String[]{"推荐", "最热", "最新", "热藏", "飙升"};
@@ -152,9 +152,7 @@ public class LxApiHelper {
         }
     }
 
-    // =========================================================================
-    // 3. 【核心重构】全平台官方实时动态分类树拉取 (与 lxserver 完全对齐)
-    // =========================================================================
+    // 3. 全平台官方实时动态分类树拉取[cite: 1]
     public static Map<String, ArrayList<CategoryTag>> fetchDynamicCategories(String platform) {
         String key = platform.toLowerCase();
         if (CATEGORY_CACHE.containsKey(key)) {
@@ -165,7 +163,6 @@ public class LxApiHelper {
 
         try {
             if ("tx".equalsIgnoreCase(platform)) {
-                // QQ音乐：直连官方分类树服务
                 String res = httpGet("https://c.y.qq.com/splcloud/fcgi-bin/fcg_get_diss_tag_conf.fcg?g_tk=5381&format=json&inCharset=utf8&outCharset=utf-8");
                 if (res != null) {
                     JSONObject root = new JSONObject(res);
@@ -183,7 +180,6 @@ public class LxApiHelper {
                     }
                 }
             } else if ("wy".equalsIgnoreCase(platform)) {
-                // 网易云音乐：直连官方歌单分类全表服务
                 String res = httpGet("https://music.163.com/api/playlist/catalogue");
                 if (res != null) {
                     JSONObject root = new JSONObject(res);
@@ -210,7 +206,6 @@ public class LxApiHelper {
                     }
                 }
             } else if ("kg".equalsIgnoreCase(platform)) {
-                // 酷狗音乐：直连官方标签体系接口
                 String res = httpGet("http://mobilecdn.kugou.com/api/v3/tag/list?pid=0&apiversion=4");
                 if (res != null) {
                     JSONObject root = new JSONObject(res);
@@ -230,7 +225,6 @@ public class LxApiHelper {
                     }
                 }
             } else if ("kw".equalsIgnoreCase(platform)) {
-                // 酷我音乐：直连专区分组体系接口
                 String res = httpGet("http://wapi.kuwo.cn/api/pc/classify/playlist/getTagList");
                 if (res != null) {
                     JSONObject root = new JSONObject(res);
@@ -248,7 +242,6 @@ public class LxApiHelper {
                     }
                 }
             } else if ("mg".equalsIgnoreCase(platform)) {
-                // 咪咕音乐：官方风格标签组
                 String res = httpGet("https://app.c.nf.migu.cn/MIGUM2.0/v1.0/content/queryTagGroup.do");
                 if (res != null && res.contains("tagGroups")) {
                     JSONObject root = new JSONObject(res);
@@ -270,7 +263,6 @@ public class LxApiHelper {
             }
         } catch (Throwable ignored) {}
 
-        // 如果网络抖动导致解析为空，启用预设保护，确保界面不会空荡荡
         if (result.isEmpty()) {
             Map<String, String[]> preset = getFallbackCategories(platform);
             for (Map.Entry<String, String[]> entry : preset.entrySet()) {
@@ -285,7 +277,6 @@ public class LxApiHelper {
         return result;
     }
 
-    // 备用兜底字典（仅在官方接口超时或断网时激活）
     private static Map<String, String[]> getFallbackCategories(String platformCode) {
         Map<String, String[]> cat = new LinkedHashMap<String, String[]>();
         if ("wy".equals(platformCode)) {
@@ -307,9 +298,7 @@ public class LxApiHelper {
         return cat;
     }
 
-    // =========================================================================
-    // 4. 【核心重构】全平台官方实时动态排行榜大纲拉取 (支持全部 20~43 个榜单)
-    // =========================================================================
+    // 4. 全平台官方实时动态排行榜大纲拉取[cite: 1]
     public static ArrayList<LeaderboardInfo> fetchDynamicLeaderboards(String platform) {
         String key = platform.toLowerCase();
         if (LEADERBOARD_CACHE.containsKey(key)) {
@@ -320,7 +309,6 @@ public class LxApiHelper {
 
         try {
             if ("tx".equalsIgnoreCase(platform)) {
-                // QQ音乐：通过官方 ToplistInfoServer 统一 RPC 获取全部 25+ 榜单
                 String reqJson = "{\"comm\":{\"cv\":4747474,\"ct\":24,\"format\":\"json\",\"inCharset\":\"utf-8\",\"outCharset\":\"utf-8\",\"platform\":\"yqq.json\"},\"toplist\":{\"module\":\"musicToplist.ToplistInfoServer\",\"method\":\"GetAll\",\"param\":{}}}";
                 String url = "https://u.y.qq.com/cgi-bin/musicu.fcg?format=json&inCharset=utf8&outCharset=utf-8&data=" + URLEncoder.encode(reqJson, "UTF-8");
                 String res = httpGet(url);
@@ -336,7 +324,6 @@ public class LxApiHelper {
                     }
                 }
             } else if ("wy".equalsIgnoreCase(platform)) {
-                // 网易云音乐：调用官方 /api/toplist 接口动态拉取全部 42 个榜单
                 String res = httpGet("https://music.163.com/api/toplist");
                 if (res != null) {
                     JSONObject root = new JSONObject(res);
@@ -347,7 +334,6 @@ public class LxApiHelper {
                     }
                 }
             } else if ("kg".equalsIgnoreCase(platform)) {
-                // 酷狗音乐：调用官方全量排行榜总表
                 String res = httpGet("http://mobilecdn.kugou.com/api/v3/rank/list?version=9108&plat=0&showtype=2&parentid=0&apiversion=6");
                 if (res != null) {
                     JSONObject root = new JSONObject(res);
@@ -358,7 +344,6 @@ public class LxApiHelper {
                     }
                 }
             } else if ("kw".equalsIgnoreCase(platform)) {
-                // 酷我音乐：调用官方全量 43 个榜单索引接口
                 String res = httpGet("http://kbangserver.kuwo.cn/ksong.s?from=pc&fmt=json&type=bang&data=index");
                 if (res != null) {
                     JSONArray groups = new JSONArray(res);
@@ -374,7 +359,6 @@ public class LxApiHelper {
                     }
                 }
             } else if ("mg".equalsIgnoreCase(platform)) {
-                // 咪咕音乐官方核心榜单
                 list.add(new LeaderboardInfo("27553319", "咪咕热歌榜", ""));
                 list.add(new LeaderboardInfo("27186466", "咪咕新歌榜", ""));
                 list.add(new LeaderboardInfo("27553258", "咪咕飙升榜", ""));
@@ -392,7 +376,6 @@ public class LxApiHelper {
         if (!list.isEmpty()) {
             LEADERBOARD_CACHE.put(key, list);
         } else {
-            // 异常兜底
             list.add(new LeaderboardInfo("hot", "热歌榜", ""));
             list.add(new LeaderboardInfo("new", "新歌榜", ""));
             list.add(new LeaderboardInfo("soar", "飙升榜", ""));
@@ -401,14 +384,11 @@ public class LxApiHelper {
         return list;
     }
 
-    // =========================================================================
-    // 5. 歌单广场歌单列表获取 (支持精准 tagId/tagName 与最新/最热排序)
-    // =========================================================================
+    // 5. 歌单广场歌单列表获取[cite: 1]
     public static ArrayList<PlaylistInfo> fetchPlaylists(String platform, String tagId, String tagName, String sort, int page) {
         ArrayList<PlaylistInfo> list = new ArrayList<PlaylistInfo>();
         try {
             if ("tx".equalsIgnoreCase(platform)) {
-                // QQ音乐：优先使用分类 ID（未选则为 10000000 即全部分类）
                 String catId = (tagId != null && tagId.length() > 0 && !"全部".equals(tagId)) ? tagId : "10000000";
                 int sortId = "最新".equals(sort) ? 2 : 5;
                 String url = "https://c.y.qq.com/splcloud/fcgi-bin/fcg_get_diss_by_tag.fcg?sin=" + ((page - 1) * 30) + "&ein=" + (page * 30 - 1) + "&categoryId=" + catId + "&sortId=" + sortId + "&format=json&inCharset=utf8&outCharset=utf-8&utf8=1";
@@ -426,7 +406,7 @@ public class LxApiHelper {
                     }
                 }
             } else if ("kg".equalsIgnoreCase(platform)) {
-                int sortVal = 2; // 最热
+                int sortVal = 2;
                 if ("推荐".equals(sort)) sortVal = 5;
                 else if ("最新".equals(sort)) sortVal = 1;
                 else if ("热藏".equals(sort)) sortVal = 3;
@@ -495,7 +475,6 @@ public class LxApiHelper {
                     }
                 }
             } else {
-                // 网易云
                 String cat = (tagName == null || tagName.length() == 0 || "全部".equals(tagName)) ? "全部" : tagName;
                 String orderVal = "最新".equals(sort) ? "new" : "hot";
                 String encodedTag = URLEncoder.encode(cat, "UTF-8");
@@ -518,12 +497,11 @@ public class LxApiHelper {
         return list;
     }
 
-    // 保留兼容性重载
     public static ArrayList<PlaylistInfo> fetchPlaylists(String platform, String tag, String sort, int page) {
         return fetchPlaylists(platform, tag, tag, sort, page);
     }
 
-    // 6. 搜索歌单
+    // 6. 搜索歌单[cite: 1]
     public static ArrayList<PlaylistInfo> searchPlaylists(String platform, String keyword, int page) {
         ArrayList<PlaylistInfo> list = new ArrayList<PlaylistInfo>();
         try {
@@ -596,7 +574,7 @@ public class LxApiHelper {
         return list;
     }
 
-    // 7. 歌单内歌曲抓取
+    // 7. 歌单内歌曲抓取[cite: 1]
     public static ArrayList<MainActivity.DisplayEntry> fetchPlaylistSongs(String rawPlaylistId) {
         ArrayList<MainActivity.DisplayEntry> songs = new ArrayList<MainActivity.DisplayEntry>();
         try {
@@ -705,9 +683,7 @@ public class LxApiHelper {
         return songs;
     }
 
-    // =========================================================================
-    // 8. 排行榜歌曲列表获取 (QQ音乐走 musicu 现代协议，全量榜单无缝支持)
-    // =========================================================================
+    // 8. 排行榜歌曲列表获取[cite: 1]
     public static ArrayList<MainActivity.DisplayEntry> fetchLeaderboardSongs(String platform, String boardKey) {
         ArrayList<MainActivity.DisplayEntry> songs = new ArrayList<MainActivity.DisplayEntry>();
         try {
@@ -790,19 +766,25 @@ public class LxApiHelper {
         return songs;
     }
 
-    // 9. 智能防盗链网络通道 (各平台专属防盗链头部隔离机制)
+    // 9. 智能防盗链网络通道 (带 301/302 跨协议重定向自动递归处理)
     public static String httpGet(String urlStr) {
+        return httpGetWithRedirect(urlStr, 0);
+    }
+
+    private static String httpGetWithRedirect(String urlStr, int depth) {
+        if (depth > 5) return null;
         HttpURLConnection conn = null;
         try {
             TLSSocketFactory.install();
             URL url = new URL(urlStr);
             conn = (HttpURLConnection) url.openConnection();
+            conn.setInstanceFollowRedirects(false); // 手工接管重定向，解决 Android 原生无法跨 HTTP/HTTPS 跳转的问题
             conn.setRequestMethod("GET");
             conn.setConnectTimeout(7000);
             conn.setReadTimeout(9000);
             conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36");
 
-            // 动态匹配各平台官方防盗链校验头
+            // 动态匹配各大音乐平台防盗链头[cite: 1]
             if (urlStr.contains("163.com")) {
                 conn.setRequestProperty("Referer", "https://music.163.com/");
             } else if (urlStr.contains("qq.com")) {
@@ -820,7 +802,21 @@ public class LxApiHelper {
             if (conn instanceof HttpsURLConnection) {
                 ((HttpsURLConnection) conn).setSSLSocketFactory(new TLSSocketFactory());
             }
-            if (conn.getResponseCode() == 200) {
+
+            int code = conn.getResponseCode();
+
+            // 处理 301、302、303、307 重定向跳转
+            if (code == 301 || code == 302 || code == 303 || code == 307) {
+                String location = conn.getHeaderField("Location");
+                conn.disconnect();
+                if (location != null && location.length() > 0) {
+                    URL nextUrl = new URL(url, location);
+                    return httpGetWithRedirect(nextUrl.toString(), depth + 1);
+                }
+                return null;
+            }
+
+            if (code == 200) {
                 String charset = "UTF-8";
                 String contentType = conn.getContentType();
                 if (contentType != null) {
