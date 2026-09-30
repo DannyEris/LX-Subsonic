@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 import javax.net.ssl.HttpsURLConnection;
 
@@ -60,7 +61,7 @@ public class LxApiHelper {
     }
 
     public static class LyricCandidate {
-        public String source; // "wy" 或 "kg"
+        public String source; // "wy", "kg", "tx", "kw"
         public String id;
         public String title;
         public String artist;
@@ -76,7 +77,10 @@ public class LxApiHelper {
 
         @Override
         public String toString() {
-            String tag = "wy".equals(source) ? "[网易云]" : "[酷狗]";
+            String tag = "[网易云]";
+            if ("kg".equals(source)) tag = "[酷狗]";
+            else if ("tx".equals(source)) tag = "[QQ音乐]";
+            else if ("kw".equals(source)) tag = "[酷我]";
             return tag + " " + title + " - " + artist;
         }
     }
@@ -99,8 +103,9 @@ public class LxApiHelper {
                 }
             } else if (url.contains("kugou.com")) {
                 String u = url.replace("{size}", "200");
-                if (u.startsWith("http://")) {
-                    u = "https://" + u.substring(7);
+                // Android 4.2 保持 HTTP 明文，避免酷狗 CDN 证书链报错
+                if (u.startsWith("https://")) {
+                    u = "http://" + u.substring(8);
                 }
                 return u;
             } else if (url.contains("gtimg.cn") || url.contains("qq.com")) {
@@ -108,6 +113,27 @@ public class LxApiHelper {
             }
         } catch (Throwable ignored) {}
         return url;
+    }
+
+    // 通过酷狗官方轻量接口利用 Hash 获取歌曲封面大图
+    public static String fetchKugouSongCover(String hash) {
+        if (hash == null || hash.length() == 0) return null;
+        try {
+            String cleanHash = hash.startsWith("kg_") ? hash.substring(3) : hash;
+            String url = "http://wwwapi.kugou.com/yy/index.php?r=play/getdata&hash=" + cleanHash + "&mid=1";
+            String res = httpGet(url);
+            if (res != null && res.contains("\"img\"")) {
+                JSONObject root = new JSONObject(res);
+                JSONObject data = root.optJSONObject("data");
+                if (data != null) {
+                    String img = data.optString("img", "");
+                    if (img.length() > 0) {
+                        return formatCoverThumbnail(img);
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
+        return null;
     }
 
     public static void clearCategoryCache(String platform) {
@@ -695,10 +721,8 @@ public class LxApiHelper {
                                 artist = p[0].trim(); title = p[1].trim();
                             }
                             String hash = o.optString("hash", "");
-                            String cover = o.optString("imgurl", "");
-                            if (cover.length() == 0) cover = o.optString("album_img", "");
-                            if (cover.length() == 0) cover = o.optString("img", "");
-                            String coverUrl = cover.length() > 0 ? formatCoverThumbnail(cover) : null;
+                            // 传入带有 kg_hash 的特殊标记，由 MainActivity 在播放时异步换取真实大图
+                            String coverUrl = (hash.length() > 0) ? ("kg_hash:" + hash) : null;
                             songs.add(new MainActivity.DisplayEntry("kg_" + hash, title, artist, artist + " [" + qualityLabel + "]", coverUrl, qualityLabel, true, bitRateNumeric));
                         }
                     }
@@ -718,7 +742,8 @@ public class LxApiHelper {
                             if (s.has("singer") && s.getJSONArray("singer").length() > 0) {
                                 artist = s.getJSONArray("singer").getJSONObject(0).getString("name");
                             }
-                            songs.add(new MainActivity.DisplayEntry("tx_" + songmid, title, artist, artist + " [" + qualityLabel + "]", null, qualityLabel, true, bitRateNumeric));
+                            String cover = "https://y.gtimg.cn/music/photo_new/T002R300x300M000" + s.optJSONObject("album").optString("mid", "") + ".jpg";
+                            songs.add(new MainActivity.DisplayEntry("tx_" + songmid, title, artist, artist + " [" + qualityLabel + "]", formatCoverThumbnail(cover), qualityLabel, true, bitRateNumeric));
                         }
                     }
                 }
@@ -734,7 +759,8 @@ public class LxApiHelper {
                             String songId = o.getString("id");
                             String title = o.getString("name");
                             String artist = o.optString("artist", "酷我歌手");
-                            songs.add(new MainActivity.DisplayEntry("kw_" + songId, title, artist, artist + " [" + qualityLabel + "]", null, qualityLabel, true, bitRateNumeric));
+                            String pic = o.optString("pic", o.optString("web_albumpic_short", ""));
+                            songs.add(new MainActivity.DisplayEntry("kw_" + songId, title, artist, artist + " [" + qualityLabel + "]", formatCoverThumbnail(pic), qualityLabel, true, bitRateNumeric));
                         }
                     }
                 }
@@ -773,7 +799,7 @@ public class LxApiHelper {
                 return fetchPlaylistSongs("wy_" + boardKey, qualityLabel);
             } else if ("tx".equalsIgnoreCase(platform)) {
                 String reqJson = "{\"detail\":{\"module\":\"musicToplist.ToplistInfoServer\",\"method\":\"GetDetail\",\"param\":{\"topId\":" + boardKey + ",\"offset\":0,\"num\":100}}}";
-                String url = "https://u.y.qq.com/cgi-bin/musicu.fcg?format=json&inCharset=utf8&outCharset=utf-8&utf8=1&data=" + URLEncoder.encode(reqJson, "UTF-8");
+                String url = "https://u.y.qq.com/cgi-bin/musicu.fcg?format=json&inCharset=utf8&outCharset=utf-8&data=" + URLEncoder.encode(reqJson, "UTF-8");
                 String res = httpGet(url);
                 if (res != null && res.contains("\"songInfoList\"")) {
                     JSONObject root = new JSONObject(res);
@@ -786,7 +812,8 @@ public class LxApiHelper {
                         if (s.has("singer") && s.getJSONArray("singer").length() > 0) {
                             artist = s.getJSONArray("singer").getJSONObject(0).getString("name");
                         }
-                        songs.add(new MainActivity.DisplayEntry("tx_" + mid, title, artist, artist + " [" + qualityLabel + "]", null, qualityLabel, true, bitRateNumeric));
+                        String cover = "https://y.gtimg.cn/music/photo_new/T002R300x300M000" + s.optJSONObject("album").optString("mid", "") + ".jpg";
+                        songs.add(new MainActivity.DisplayEntry("tx_" + mid, title, artist, artist + " [" + qualityLabel + "]", formatCoverThumbnail(cover), qualityLabel, true, bitRateNumeric));
                     }
                 }
             } else if ("kg".equalsIgnoreCase(platform)) {
@@ -805,10 +832,7 @@ public class LxApiHelper {
                                 artist = p[0].trim(); title = p[1].trim();
                             }
                             String hash = o.optString("hash", "");
-                            String cover = o.optString("imgurl", "");
-                            if (cover.length() == 0) cover = o.optString("album_img", "");
-                            if (cover.length() == 0) cover = o.optString("img", "");
-                            String coverUrl = cover.length() > 0 ? formatCoverThumbnail(cover) : null;
+                            String coverUrl = (hash.length() > 0) ? ("kg_hash:" + hash) : null;
                             songs.add(new MainActivity.DisplayEntry("kg_" + hash, title, artist, artist + " [" + qualityLabel + "]", coverUrl, qualityLabel, true, bitRateNumeric));
                         }
                     }
@@ -825,7 +849,8 @@ public class LxApiHelper {
                             String id = o.getString("id");
                             String title = o.getString("name");
                             String artist = o.optString("artist", "酷我歌手");
-                            songs.add(new MainActivity.DisplayEntry("kw_" + id, title, artist, artist + " [" + qualityLabel + "]", null, qualityLabel, true, bitRateNumeric));
+                            String pic = o.optString("pic", o.optString("web_albumpic_short", ""));
+                            songs.add(new MainActivity.DisplayEntry("kw_" + id, title, artist, artist + " [" + qualityLabel + "]", formatCoverThumbnail(pic), qualityLabel, true, bitRateNumeric));
                         }
                     }
                 }
@@ -852,16 +877,16 @@ public class LxApiHelper {
         return songs;
     }
 
-    // 跨平台（网易云 + 酷狗）搜索候选歌词列表
+    // 跨四大平台（网易云 + 酷狗 + QQ音乐 + 酷我）聚合检索候选歌词
     public static ArrayList<LyricCandidate> searchLyricCandidates(String keyword) {
         ArrayList<LyricCandidate> candidates = new ArrayList<LyricCandidate>();
         if (keyword == null || keyword.trim().length() == 0) return candidates;
 
         String clean = keyword.replaceAll("\\([^)]*\\)", "").replaceAll("\\[[^\\]]*\\]", "").trim();
 
-        // 1. 网易云搜索前 5 条候选
+        // 1. 网易云音乐检索
         try {
-            String wyUrl = "https://music.163.com/api/search/get/web?s=" + URLEncoder.encode(clean, "UTF-8") + "&type=1&offset=0&total=true&limit=5";
+            String wyUrl = "https://music.163.com/api/search/get/web?s=" + URLEncoder.encode(clean, "UTF-8") + "&type=1&offset=0&total=true&limit=4";
             String res = httpGet(wyUrl);
             if (res != null && res.contains("\"songs\"")) {
                 JSONArray arr = new JSONObject(res).getJSONObject("result").getJSONArray("songs");
@@ -878,9 +903,9 @@ public class LxApiHelper {
             }
         } catch (Throwable ignored) {}
 
-        // 2. 酷狗搜索前 5 条候选
+        // 2. 酷狗音乐检索
         try {
-            String kgUrl = "http://mobilecdn.kugou.com/api/v3/search/song?keyword=" + URLEncoder.encode(clean, "UTF-8") + "&page=1&pagesize=5";
+            String kgUrl = "http://mobilecdn.kugou.com/api/v3/search/song?keyword=" + URLEncoder.encode(clean, "UTF-8") + "&page=1&pagesize=4";
             String res = httpGet(kgUrl);
             if (res != null && res.contains("\"info\"")) {
                 JSONArray arr = new JSONObject(res).getJSONObject("data").getJSONArray("info");
@@ -896,10 +921,52 @@ public class LxApiHelper {
             }
         } catch (Throwable ignored) {}
 
+        // 3. QQ音乐检索
+        try {
+            String txUrl = "https://c.y.qq.com/soso/fcgi-bin/client_search_cp?p=1&n=4&w=" + URLEncoder.encode(clean, "UTF-8") + "&format=json";
+            String res = httpGet(txUrl);
+            if (res != null && res.contains("\"song\"")) {
+                JSONObject data = new JSONObject(res).optJSONObject("data");
+                if (data != null && data.has("song")) {
+                    JSONArray arr = data.getJSONObject("song").getJSONArray("list");
+                    for (int i = 0; i < arr.length(); i++) {
+                        JSONObject s = arr.getJSONObject(i);
+                        String songmid = s.optString("songmid", "");
+                        String songname = s.optString("songname", "");
+                        String singername = "群星";
+                        if (s.has("singer") && s.getJSONArray("singer").length() > 0) {
+                            singername = s.getJSONArray("singer").getJSONObject(0).optString("name", "群星");
+                        }
+                        if (songmid.length() > 0) {
+                            candidates.add(new LyricCandidate("tx", songmid, songname, singername, ""));
+                        }
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
+
+        // 4. 酷我音乐检索
+        try {
+            String kwUrl = "http://search.kuwo.cn/r.s?all=" + URLEncoder.encode(clean, "UTF-8") + "&ft=music&item=4&pn=0&rformat=json";
+            String res = httpGet(kwUrl);
+            if (res != null && res.contains("\"abslist\"")) {
+                JSONArray arr = new JSONObject(res).getJSONArray("abslist");
+                for (int i = 0; i < arr.length(); i++) {
+                    JSONObject s = arr.getJSONObject(i);
+                    String musicrid = s.optString("MUSICRID", "").replace("MUSIC_", "");
+                    String songname = s.optString("SONGNAME", "");
+                    String artist = s.optString("ARTIST", "");
+                    if (musicrid.length() > 0) {
+                        candidates.add(new LyricCandidate("kw", musicrid, songname, artist, ""));
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
+
         return candidates;
     }
 
-    // 根据候选目标下载对应的歌词内容（酷狗走 KRC/LRC 解码，网易云走 LRC 解码）
+    // 从候选目标下载歌词文本
     public static String fetchLyricFromCandidate(LyricCandidate c) {
         if (c == null) return null;
         try {
@@ -911,15 +978,43 @@ public class LxApiHelper {
                 }
             } else if ("kg".equals(c.source)) {
                 return fetchKugouLyricByHash(c.id);
+            } else if ("tx".equals(c.source)) {
+                String txUrl = "https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid=" + c.id + "&format=json&nobase64=1";
+                String res = httpGet(txUrl);
+                if (res != null && res.contains("\"lyric\"")) {
+                    String lrc = new JSONObject(res).optString("lyric", "");
+                    return lrc.replace("&apos;", "'").replace("&quot;", "\"")
+                              .replace("&amp;", "&").replace("&#58;", ":")
+                              .replace("&#10;", "\n").replace("&#46;", ".")
+                              .replace("&#32;", " ");
+                }
+            } else if ("kw".equals(c.source)) {
+                String kwUrl = "http://m.kuwo.cn/newh5/singles/songinfoandlrc?musicId=" + c.id;
+                String res = httpGet(kwUrl);
+                if (res != null && res.contains("\"lrclist\"")) {
+                    JSONObject data = new JSONObject(res).optJSONObject("data");
+                    if (data != null && data.has("lrclist")) {
+                        JSONArray list = data.getJSONArray("lrclist");
+                        StringBuilder sb = new StringBuilder();
+                        for (int i = 0; i < list.length(); i++) {
+                            JSONObject item = list.getJSONObject(i);
+                            float sec = Float.parseFloat(item.optString("time", "0"));
+                            int m = (int) (sec / 60);
+                            float s = sec % 60;
+                            sb.append(String.format(Locale.US, "[%02d:%05.2f]%s\n", m, s, item.optString("lineLyric", "")));
+                        }
+                        return sb.toString();
+                    }
+                }
             }
         } catch (Throwable ignored) {}
         return null;
     }
 
-    // 酷狗原站歌词解析通道（利用 hash 换取 accesskey，Base64 解出标准 LRC）
     public static String fetchKugouLyricByHash(String hash) {
         try {
-            String searchUrl = "http://krcs.kugou.com/search?ver=1&man=yes&client=mobi&keyword=&duration=&hash=" + hash;
+            String cleanHash = hash.startsWith("kg_") ? hash.substring(3) : hash;
+            String searchUrl = "http://krcs.kugou.com/search?ver=1&man=yes&client=mobi&keyword=&duration=&hash=" + cleanHash;
             String searchRes = httpGet(searchUrl);
             if (searchRes != null && searchRes.contains("\"candidates\"")) {
                 JSONArray cArr = new JSONObject(searchRes).getJSONArray("candidates");
