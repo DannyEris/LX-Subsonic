@@ -44,6 +44,7 @@ import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
+import java.security.MessageDigest;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -109,7 +110,11 @@ public class MainActivity extends Activity {
     private String currentPlazaSearchKeyword = "";
     private boolean isPlazaGridMode = true;
     private TextView footerPlazaLoading;
-    private int currentPlazaRequestId = 0; // 请求序列号防多线程乱序闪退
+    private int currentPlazaRequestId = 0;
+    private boolean isGridFlinging = false;
+
+    // 歌单广场多平台快照缓存（实现平台秒切，0延迟）
+    private static final Map<String, ArrayList<DisplayEntry>> PLAZA_SNAPSHOT_CACHE = new HashMap<String, ArrayList<DisplayEntry>>();
 
     // 排行榜
     private Spinner spinnerRankingPlatform;
@@ -283,7 +288,6 @@ public class MainActivity extends Activity {
                 int duration = intent.getIntExtra("duration", 0);
                 int bufferPercent = intent.getIntExtra("bufferPercent", -1);
 
-                // 更新缓冲百分比数值（缓冲中显示，缓冲完毕或播放本地歌曲自动隐藏）
                 if (bufferPercent >= 0 && bufferPercent < 100) {
                     String bufStr = "缓冲 " + bufferPercent + "%";
                     if (tvBottomBuffer != null) {
@@ -349,9 +353,7 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         TLSSocketFactory.install();
 
-        // 防止启动时自动弹起软键盘遮挡界面
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
-
         setContentView(R.layout.activity_main);
         prefs = getSharedPreferences("subsonic_cfg", MODE_PRIVATE);
         lyricBaseFontSize = prefs.getInt("lyric_font_size", 15);
@@ -387,7 +389,6 @@ public class MainActivity extends Activity {
         fetchHotSearchForCurrentPlatform();
         fetchServerFavoritesQuietly();
 
-        // 强行清除搜索输入框焦点
         if (etSearchKeyword != null) etSearchKeyword.clearFocus();
     }
 
@@ -502,7 +503,6 @@ public class MainActivity extends Activity {
         btnFavBack = (Button) findViewById(R.id.btn_fav_back);
         lvFavPlaylists = (ListView) findViewById(R.id.lv_fav_playlists);
 
-        // 动态容错：若布局 XML 暂未添加 btn_fav_refresh，在新建歌单左侧自动动态注入刷新按钮
         if (btnFavRefresh == null && btnCreatePlaylist != null && btnCreatePlaylist.getParent() instanceof ViewGroup) {
             ViewGroup parent = (ViewGroup) btnCreatePlaylist.getParent();
             btnFavRefresh = new Button(this);
@@ -684,7 +684,7 @@ public class MainActivity extends Activity {
             if (etSearchKeyword != null) etSearchKeyword.clearFocus();
         } else if (page == PAGE_PLAZA) {
             setupPlazaSortButtons();
-            loadPlazaSonglists(true);
+            loadPlazaSonglists(false);
         } else if (page == PAGE_RANKING) {
             loadLeaderboardBoards();
         } else if (page == PAGE_FAV) {
@@ -729,7 +729,7 @@ public class MainActivity extends Activity {
                     if (!sName.equals(currentPlazaSort)) {
                         currentPlazaSort = sName;
                         setupPlazaSortButtons();
-                        loadPlazaSonglists(true);
+                        loadPlazaSonglists(false);
                     }
                 }
             });
@@ -971,6 +971,7 @@ public class MainActivity extends Activity {
         }).start();
     }
 
+    // 核心优化：集成平台秒切快照机制，快速切标签即显，杜绝反复请求与卡顿
     private void loadPlazaSonglists(boolean isRefresh) {
         if (isLoadingPlaza) return;
         btnPlazaBack.setVisibility(View.GONE);
@@ -980,9 +981,33 @@ public class MainActivity extends Activity {
         final String tagId = currentPlazaTagId;
         final String tagName = currentPlazaTagName;
 
+        final String snapshotKey = code + "_" + tagId + "_" + currentPlazaSort;
+
+        // 如果不是主动刷新且第一页有缓存快照，实现 0ms 秒切显示
+        if (!isRefresh && currentPlazaPage == 1 && PLAZA_SNAPSHOT_CACHE.containsKey(snapshotKey)) {
+            ArrayList<DisplayEntry> cachedSnapshot = PLAZA_SNAPSHOT_CACHE.get(snapshotKey);
+            if (cachedSnapshot != null && !cachedSnapshot.isEmpty()) {
+                plazaPlaylistsList.clear();
+                plazaPlaylistsList.addAll(cachedSnapshot);
+                plazaPlaylistsData.clear();
+                for (DisplayEntry info : plazaPlaylistsList) {
+                    Map<String, String> row = new HashMap<String, String>();
+                    row.put("title", info.title);
+                    row.put("subtitle", (info.artist.length() > 0 ? (info.artist + " · ") : "") + info.subtitle);
+                    plazaPlaylistsData.add(row);
+                }
+                plazaPlaylistsAdapter.notifyDataSetChanged();
+                plazaGridAdapter.notifyDataSetChanged();
+                tvPlazaCurrentTag.setText("当前分类: " + (tagName.length() > 0 ? tagName : "全部分类") + " · " + currentPlazaSort + " (快照已加载)");
+                currentPlazaPage = (plazaPlaylistsList.size() / 30) + 1;
+                return;
+            }
+        }
+
         final int reqId = ++currentPlazaRequestId;
 
         if (isRefresh) {
+            PLAZA_SNAPSHOT_CACHE.remove(snapshotKey);
             currentPlazaPage = 1;
             hasMorePlaza = true;
             plazaPlaylistsList.clear();
@@ -1005,7 +1030,7 @@ public class MainActivity extends Activity {
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
-                        if (reqId != currentPlazaRequestId) return; // 废弃已过期的网络返回，防止数据串线
+                        if (reqId != currentPlazaRequestId) return;
                         isLoadingPlaza = false;
                         if (list != null && !list.isEmpty()) {
                             for (LxApiHelper.PlaylistInfo info : list) {
@@ -1018,6 +1043,8 @@ public class MainActivity extends Activity {
                                 row.put("subtitle", (info.author.length() > 0 ? (info.author + " · ") : "") + playCountFmt);
                                 plazaPlaylistsData.add(row);
                             }
+                            // 保存至快照池中
+                            PLAZA_SNAPSHOT_CACHE.put(snapshotKey, new ArrayList<DisplayEntry>(plazaPlaylistsList));
                             plazaPlaylistsAdapter.notifyDataSetChanged();
                             plazaGridAdapter.notifyDataSetChanged();
                             if (list.size() < 25) {
@@ -1288,7 +1315,6 @@ public class MainActivity extends Activity {
 
     private void openSonglistDetails(final DisplayEntry playlistEntry) {
         btnPlazaBack.setVisibility(View.VISIBLE);
-        // 关键体验修复：无论原本是不是网格模式，进入歌曲列表强制切换为列表呈现
         gvPlazaPlaylists.setVisibility(View.GONE);
         lvPlazaPlaylists.setVisibility(View.VISIBLE);
 
@@ -1539,7 +1565,6 @@ public class MainActivity extends Activity {
                         }
                     } catch (Exception ignored) {}
                 }
-                // 核心修复点 1：必须在主线程原子性注入并通知 Adapter，杜绝子线程篡改 ListView 引发闪退
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
@@ -1773,7 +1798,7 @@ public class MainActivity extends Activity {
                 currentPlazaTagName = "";
                 btnPlazaCategory.setText("全部分类 ▾");
                 setupPlazaSortButtons();
-                loadPlazaSonglists(true);
+                loadPlazaSonglists(false);
             }
             @Override public void onNothingSelected(AdapterView<?> parent) {}
         });
@@ -1876,12 +1901,11 @@ public class MainActivity extends Activity {
             @Override public void onClick(View v) { promptImportPlaylist(); }
         });
 
-        // 返回广场并恢复用户设定的视图模式
         btnPlazaBack.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 btnPlazaBack.setVisibility(View.GONE);
                 updatePlazaViewModeState();
-                loadPlazaSonglists(true);
+                loadPlazaSonglists(false);
             }
         });
 
@@ -1944,8 +1968,19 @@ public class MainActivity extends Activity {
             }
         });
 
+        // 绑定快速滑动监听，滑行时暂停图片下载，停驻后恢复
         AbsListView.OnScrollListener autoScrollLoader = new AbsListView.OnScrollListener() {
-            @Override public void onScrollStateChanged(AbsListView view, int scrollState) {}
+            @Override
+            public void onScrollStateChanged(AbsListView view, int scrollState) {
+                if (scrollState == SCROLL_STATE_FLING) {
+                    isGridFlinging = true;
+                } else {
+                    if (isGridFlinging) {
+                        isGridFlinging = false;
+                        plazaGridAdapter.notifyDataSetChanged();
+                    }
+                }
+            }
             @Override
             public void onScroll(AbsListView view, int firstVisibleItem, int visibleItemCount, int totalItemCount) {
                 if (!isBrowsingArtistOrAlbum && btnPlazaBack.getVisibility() != View.VISIBLE) {
@@ -1996,7 +2031,6 @@ public class MainActivity extends Activity {
             }
         });
 
-        // 收藏与歌单刷新逻辑修复（解除死循环拉取，并在主线程安全替换数据源）
         if (btnFavRefresh != null) {
             btnFavRefresh.setOnClickListener(new View.OnClickListener() {
                 @Override
@@ -2079,6 +2113,7 @@ public class MainActivity extends Activity {
         btnClearCache.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 CacheManager.clearAllCache(MainActivity.this);
+                clearDiskCovers();
                 updateCacheSizeDisplay();
                 Toast.makeText(MainActivity.this, "本地缓存已清空", Toast.LENGTH_SHORT).show();
             }
@@ -3548,7 +3583,6 @@ public class MainActivity extends Activity {
     }
 
     private void setupVinylAnimation() {
-        // 关键性能优化：对黑胶盘开启硬件加速合成层，使旋转由 GPU 独立渲染，彻底消除卡顿
         if (flVinylDisc != null) {
             flVinylDisc.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         }
@@ -3880,13 +3914,116 @@ public class MainActivity extends Activity {
             if (currentPage == PAGE_PLAZA && btnPlazaBack.getVisibility() == View.VISIBLE) {
                 btnPlazaBack.setVisibility(View.GONE);
                 updatePlazaViewModeState();
-                loadPlazaSonglists(true);
+                loadPlazaSonglists(false);
                 return true;
             }
             moveTaskToBack(true);
             return true;
         }
         return super.onKeyDown(keyCode, event);
+    }
+
+    // =========================================================================
+    // 磁盘持久缓存与下采样解码模块（彻底解决 Android 4.2 x86 平板滑动顿挫卡死问题）
+    // =========================================================================
+    private static File getCoverDiskCacheDir(Context context) {
+        File baseDir = context.getExternalCacheDir();
+        if (baseDir == null || !baseDir.exists()) baseDir = context.getCacheDir();
+        File coverDir = new File(baseDir, "covers");
+        if (!coverDir.exists()) coverDir.mkdirs();
+        return coverDir;
+    }
+
+    private static String hashKeyForDisk(String key) {
+        if (key == null) return "unknown";
+        try {
+            MessageDigest m = MessageDigest.getInstance("MD5");
+            m.update(key.getBytes("UTF-8"));
+            byte[] s = m.digest();
+            StringBuilder sb = new StringBuilder();
+            for (byte b : s) sb.append(Integer.toHexString((b & 0xFF) | 0x100).substring(1, 3));
+            return sb.toString();
+        } catch (Exception e) {
+            return String.valueOf(key.hashCode());
+        }
+    }
+
+    private static Bitmap decodeSampledBitmapFromFile(File file, int reqWidth, int reqHeight) {
+        if (file == null || !file.exists()) return null;
+        try {
+            BitmapFactory.Options options = new BitmapFactory.Options();
+            options.inJustDecodeBounds = true;
+            BitmapFactory.decodeFile(file.getAbsolutePath(), options);
+
+            options.inSampleSize = calculateInSampleSize(options, reqWidth, reqHeight);
+            options.inJustDecodeBounds = false;
+            options.inPreferredConfig = Bitmap.Config.RGB_565;
+            options.inPurgeable = true;
+            options.inInputShareable = true;
+            return BitmapFactory.decodeFile(file.getAbsolutePath(), options);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private static int calculateInSampleSize(BitmapFactory.Options options, int reqWidth, int reqHeight) {
+        int height = options.outHeight;
+        int width = options.outWidth;
+        int inSampleSize = 1;
+        if (height > reqHeight || width > reqWidth) {
+            int halfHeight = height / 2;
+            int halfWidth = width / 2;
+            while ((halfHeight / inSampleSize) >= reqHeight && (halfWidth / inSampleSize) >= reqWidth) {
+                inSampleSize *= 2;
+            }
+        }
+        return Math.max(1, inSampleSize);
+    }
+
+    private static boolean downloadUrlToFile(String urlString, File destFile) {
+        File tmp = new File(destFile.getAbsolutePath() + ".tmp");
+        HttpURLConnection conn = null;
+        InputStream is = null;
+        FileOutputStream fos = null;
+        try {
+            URL url = new URL(urlString);
+            conn = (HttpURLConnection) url.openConnection();
+            conn.setConnectTimeout(6000);
+            conn.setReadTimeout(6000);
+            if (conn instanceof HttpsURLConnection) {
+                ((HttpsURLConnection) conn).setSSLSocketFactory(new TLSSocketFactory());
+            }
+            if (conn.getResponseCode() == 200) {
+                is = conn.getInputStream();
+                fos = new FileOutputStream(tmp);
+                byte[] buf = new byte[4096];
+                int len;
+                while ((len = is.read(buf)) != -1) {
+                    fos.write(buf, 0, len);
+                }
+                fos.flush();
+                fos.close(); fos = null;
+                is.close(); is = null;
+                if (destFile.exists()) destFile.delete();
+                return tmp.renameTo(destFile);
+            }
+        } catch (Throwable t) {
+            if (tmp.exists()) tmp.delete();
+        } finally {
+            try { if (fos != null) fos.close(); } catch (Exception ignored) {}
+            try { if (is != null) is.close(); } catch (Exception ignored) {}
+            if (conn != null) conn.disconnect();
+        }
+        return false;
+    }
+
+    private void clearDiskCovers() {
+        File dir = getCoverDiskCacheDir(this);
+        File[] files = dir.listFiles();
+        if (files != null) {
+            for (File f : files) f.delete();
+        }
+        if (imageMemoryCache != null) imageMemoryCache.evictAll();
     }
 
     private class PlazaGridAdapter extends BaseAdapter {
@@ -3915,43 +4052,35 @@ public class MainActivity extends Activity {
                 final String coverUrl = item.coverArt;
                 ivCover.setTag(coverUrl);
 
+                // 1. 优先读取内存 LRU 缓存
                 Bitmap cached = imageMemoryCache != null ? imageMemoryCache.get(coverUrl) : null;
                 if (cached != null) {
                     ivCover.setImageBitmap(cached);
-                } else {
+                } else if (!isGridFlinging) {
+                    // 2. 飞滑时不盲目提交线程，停顿或慢滑时走磁盘-网络两级加载
                     imageLoadExecutor.execute(new Runnable() {
                         @Override public void run() {
-                            HttpURLConnection c = null;
-                            InputStream is = null;
-                            try {
-                                URL url = new URL(coverUrl);
-                                c = (HttpURLConnection) url.openConnection();
-                                c.setConnectTimeout(6000);
-                                c.setReadTimeout(6000);
-                                if (c instanceof HttpsURLConnection) {
-                                    ((HttpsURLConnection) c).setSSLSocketFactory(new TLSSocketFactory());
+                            File diskFile = new File(getCoverDiskCacheDir(MainActivity.this), hashKeyForDisk(coverUrl));
+                            Bitmap bmp = null;
+                            if (diskFile.exists() && diskFile.length() > 0) {
+                                bmp = decodeSampledBitmapFromFile(diskFile, 200, 200);
+                            }
+                            if (bmp == null) {
+                                boolean ok = downloadUrlToFile(coverUrl, diskFile);
+                                if (ok) {
+                                    bmp = decodeSampledBitmapFromFile(diskFile, 200, 200);
                                 }
-                                if (c.getResponseCode() == 200) {
-                                    is = c.getInputStream();
-                                    // 针对老旧 x86 芯片优化内存开销，改用 RGB_565 减少一半内存占用防 OOM
-                                    BitmapFactory.Options opts = new BitmapFactory.Options();
-                                    opts.inPreferredConfig = Bitmap.Config.RGB_565;
-                                    final Bitmap b = BitmapFactory.decodeStream(is, null, opts);
-                                    if (b != null) {
-                                        if (imageMemoryCache != null) imageMemoryCache.put(coverUrl, b);
-                                        runOnUiThread(new Runnable() {
-                                            @Override public void run() {
-                                                if (coverUrl.equals(ivCover.getTag())) {
-                                                    ivCover.setImageBitmap(b);
-                                                }
-                                            }
-                                        });
+                            }
+                            if (bmp != null) {
+                                if (imageMemoryCache != null) imageMemoryCache.put(coverUrl, bmp);
+                                final Bitmap finalBmp = bmp;
+                                runOnUiThread(new Runnable() {
+                                    @Override public void run() {
+                                        if (coverUrl.equals(ivCover.getTag())) {
+                                            ivCover.setImageBitmap(finalBmp);
+                                        }
                                     }
-                                }
-                            } catch (Throwable ignored) {
-                            } finally {
-                                try { if (is != null) is.close(); } catch (Exception ignored) {}
-                                if (c != null) c.disconnect();
+                                });
                             }
                         }
                     });
