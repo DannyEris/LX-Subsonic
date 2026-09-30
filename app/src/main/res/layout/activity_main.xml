@@ -65,7 +65,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="38dp"
                     android:background="@drawable/bg_btn_default"
-                    android:text="歌单"
+                    android:text="歌单广场"
                     android:textColor="#a0a5b5"
                     android:textSize="13sp"
                     android:layout_marginBottom="6dp" />
