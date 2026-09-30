@@ -65,7 +65,12 @@ public class MusicService extends Service {
     private boolean isMuted = false;
     private int currentBufferPercent = -1;
 
-    // 核心改进：专属后台单线程执行器，彻底解放 UI 线程，杜绝 ANR
+    // 失败重试与超时控制计数器
+    private int currentSongRetryCount = 0;
+    private int maxRetryCount = 3;
+    private int timeoutSec = 30;
+
+    // 专属后台单线程执行器，杜绝主线程阻塞与 ANR
     private final ExecutorService playbackExecutor = Executors.newSingleThreadExecutor();
 
     private Runnable progressRunnable = new Runnable() {
@@ -105,15 +110,30 @@ public class MusicService extends Service {
     public void onCreate() {
         super.onCreate();
         currentMode = getSharedPreferences("subsonic_cfg", MODE_PRIVATE).getInt("play_mode", MODE_LOOP_ALL);
+        loadConfig();
         mediaPlayer = new MediaPlayer();
         setupMediaPlayerListeners();
         progressHandler.post(progressRunnable);
+    }
+
+    private void loadConfig() {
+        try {
+            SharedPreferences sp = getSharedPreferences("subsonic_cfg", MODE_PRIVATE);
+            String tStr = sp.getString("timeout_sec", "30");
+            String rStr = sp.getString("retry_count", "3");
+            timeoutSec = Math.max(5, Integer.parseInt(tStr.trim()));
+            maxRetryCount = Math.max(0, Integer.parseInt(rStr.trim()));
+        } catch (Exception ignored) {
+            timeoutSec = 30;
+            maxRetryCount = 3;
+        }
     }
 
     private void setupMediaPlayerListeners() {
         mediaPlayer.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
             @Override
             public void onPrepared(MediaPlayer mp) {
+                currentSongRetryCount = 0; // 起播成功后重置重试计数
                 float v = isMuted ? 0.0f : 1.0f;
                 mp.setVolume(v, v);
                 mp.start();
@@ -130,12 +150,11 @@ public class MusicService extends Service {
             }
         });
 
-        // 关键防护：增加错误监听并返回 true，阻止系统在出错时误调用 onCompletion 导致无限切歌死循环
+        // 捕获解码器异常，结合重试计数器执行重连
         mediaPlayer.setOnErrorListener(new MediaPlayer.OnErrorListener() {
             @Override
             public boolean onError(MediaPlayer mp, int what, int extra) {
-                currentBufferPercent = -1;
-                broadcastStatus();
+                handlePlaybackFailure("播放器底层解码异常 (" + what + "," + extra + ")");
                 return true;
             }
         });
@@ -147,6 +166,7 @@ public class MusicService extends Service {
             String act = intent.getAction();
             if (ACTION_PLAY_INDEX.equals(act)) {
                 int idx = intent.getIntExtra("target_index", currentIndex);
+                currentSongRetryCount = 0; // 手动切歌或换曲时清零计数
                 playIndex(idx);
             } else if (ACTION_TOGGLE.equals(act)) {
                 toggle();
@@ -178,7 +198,8 @@ public class MusicService extends Service {
         currentBufferPercent = 0;
         broadcastStatus();
 
-        // 将准备、连接、代理全流程派发至工作线程执行，不占主线程一毫秒
+        loadConfig(); // 每次切歌实时同步用户设置的最新超时与重试配置
+
         playbackExecutor.execute(new Runnable() {
             @Override
             public void run() {
@@ -196,12 +217,14 @@ public class MusicService extends Service {
             streamProxy = null;
         }
 
+        // 本地音频文件直接解码起播
         if (item.streamUrl != null && (item.streamUrl.startsWith("file://") || item.streamUrl.startsWith("/"))) {
             currentBufferPercent = 100;
             startMediaPlayer(item.streamUrl);
             return;
         }
 
+        // 本地已有完整缓存直接起播
         if (CacheManager.isSongCached(this, item.id)) {
             File cachedFile = CacheManager.getSongFile(this, item.id);
             currentBufferPercent = 100;
@@ -225,8 +248,7 @@ public class MusicService extends Service {
 
                 @Override
                 public void onError(String reason) {
-                    currentBufferPercent = -1;
-                    broadcastStatus();
+                    handlePlaybackFailure(reason);
                 }
             });
             String localProxyUrl = streamProxy.start();
@@ -253,7 +275,28 @@ public class MusicService extends Service {
 
             mediaPlayer.prepareAsync();
         } catch (Exception e) {
-            currentBufferPercent = -1;
+            handlePlaybackFailure("MediaPlayer prepare失败: " + e.getMessage());
+        }
+    }
+
+    // 核心自动重试逻辑：结合配置判断是否重试或提示失败
+    private void handlePlaybackFailure(final String reason) {
+        if (currentSongRetryCount < maxRetryCount) {
+            currentSongRetryCount++;
+            currentBufferPercent = 0;
+            broadcastStatus();
+
+            playbackExecutor.execute(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        Thread.sleep(1000); // 间隔 1 秒后自动重试
+                    } catch (InterruptedException ignored) {}
+                    doPlayIndexBackground(currentIndex);
+                }
+            });
+        } else {
+            currentBufferPercent = -1; // 超过最大重试次数，标记失败并通知 UI
             broadcastStatus();
         }
     }
@@ -283,6 +326,7 @@ public class MusicService extends Service {
 
     private void next() {
         if (playlist.isEmpty()) return;
+        currentSongRetryCount = 0;
         if (currentMode == MODE_SHUFFLE && playlist.size() > 1) {
             int nextIdx;
             do {
@@ -297,6 +341,7 @@ public class MusicService extends Service {
 
     private void prev() {
         if (playlist.isEmpty()) return;
+        currentSongRetryCount = 0;
         int prevIdx = (currentIndex - 1 + playlist.size()) % playlist.size();
         playIndex(prevIdx);
     }
