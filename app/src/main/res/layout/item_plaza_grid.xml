@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/bg_card"
+    android:padding="6dp"
+    android:layout_margin="4dp"
+    android:gravity="center_horizontal">
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="120dp">
+        <!-- 歌单四方封面图片 -->
+        <ImageView
+            android:id="@+id/iv_grid_cover"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:scaleType="centerCrop"
+            android:src="@drawable/ic_launcher" />
+
+        <!-- 播放量半透明浮层 -->
+        <TextView
+            android:id="@+id/tv_grid_playcount"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|right"
+            android:background="#99000000"
+            android:textColor="#ffffff"
+            android:textSize="10sp"
+            android:paddingLeft="6dp"
+            android:paddingRight="6dp"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp"
+            android:text="🎧 0" />
+    </FrameLayout>
+
+    <!-- 歌单标题 -->
+    <TextView
+        android:id="@+id/tv_grid_title"
+        android:layout_width="match_parent"
+        android:layout_height="36dp"
+        android:layout_marginTop="4dp"
+        android:textColor="#ffffff"
+        android:textSize="12sp"
+        android:maxLines="2"
+        android:ellipsize="end"
+        android:text="歌单标题" />
+
+    <!-- 歌单作者/平台 -->
+    <TextView
+        android:id="@+id/tv_grid_author"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:textColor="#888c99"
+        android:textSize="10sp"
+        android:singleLine="true"
+        android:text="作者" />
+
+</LinearLayout>
