@@ -53,6 +53,10 @@ public class LocalStreamProxy {
     private File tmpFile;
     private File targetFile;
 
+    // 动态配置参数
+    private int configTimeoutSec = 30;
+    private int configRetryCount = 3;
+
     public LocalStreamProxy(Context context, String songId, String originalStreamUrl, ProxyListener listener) {
         this.context = context;
         this.songId = songId;
@@ -61,6 +65,23 @@ public class LocalStreamProxy {
 
         this.tmpFile = CacheManager.getTempFile(context, songId);
         this.targetFile = CacheManager.getSongFile(context, songId);
+
+        // 联动用户在“设置”页中填写的超时时间与重试次数
+        loadConfig();
+    }
+
+    private void loadConfig() {
+        try {
+            SharedPreferences sp = context.getSharedPreferences("subsonic_cfg", Context.MODE_PRIVATE);
+            String timeoutStr = sp.getString("timeout_sec", "30");
+            String retryStr = sp.getString("retry_count", "3");
+
+            configTimeoutSec = Math.max(5, Integer.parseInt(timeoutStr.trim()));
+            configRetryCount = Math.max(0, Integer.parseInt(retryStr.trim()));
+        } catch (Exception ignored) {
+            configTimeoutSec = 30;
+            configRetryCount = 3;
+        }
     }
 
     public synchronized String start() throws Exception {
@@ -83,33 +104,58 @@ public class LocalStreamProxy {
             public void run() {
                 TLSSocketFactory.install();
 
-                String reason = runDownloadPipeline(originalStreamUrl, 0);
-                if (isStopped) return;
+                int totalAttempts = configRetryCount + 1; // 首次尝试 + 重试次数
+                String lastError = "下载音频流失败";
 
-                if ("OK".equals(reason) && CacheManager.isValidAudioFile(tmpFile)) {
-                    if (targetFile.exists()) {
-                        targetFile.delete();
+                for (int attempt = 1; attempt <= totalAttempts; attempt++) {
+                    if (isStopped) return;
+
+                    // 重试前重置标志位并清理残缺碎片
+                    if (tmpFile.exists()) {
+                        tmpFile.delete();
                     }
-                    if (tmpFile.renameTo(targetFile)) {
-                        targetFile.setLastModified(System.currentTimeMillis());
-                        downloadFinished = true;
+                    downloadedBytes = 0;
+                    isHeaderReady = false;
 
-                        SharedPreferences sp = context.getSharedPreferences("subsonic_cfg", Context.MODE_PRIVATE);
-                        int maxMb = 500;
-                        try {
-                            maxMb = Integer.parseInt(sp.getString("cache_size_mb", "500"));
-                        } catch (Exception ignored) {}
-                        CacheManager.trimCache(context, maxMb * 1024L * 1024L, songId);
+                    lastError = runDownloadPipeline(originalStreamUrl, 0);
 
-                        if (listener != null) {
-                            listener.onCached(targetFile);
+                    if (isStopped) return;
+
+                    if ("OK".equals(lastError) && CacheManager.isValidAudioFile(tmpFile)) {
+                        if (targetFile.exists()) {
+                            targetFile.delete();
                         }
-                        return;
+                        if (tmpFile.renameTo(targetFile)) {
+                            targetFile.setLastModified(System.currentTimeMillis());
+                            downloadFinished = true;
+
+                            SharedPreferences sp = context.getSharedPreferences("subsonic_cfg", Context.MODE_PRIVATE);
+                            int maxMb = 500;
+                            try {
+                                maxMb = Integer.parseInt(sp.getString("cache_size_mb", "500"));
+                            } catch (Exception ignored) {}
+                            CacheManager.trimCache(context, maxMb * 1024L * 1024L, songId);
+
+                            if (listener != null) {
+                                listener.onCached(targetFile);
+                            }
+                            return;
+                        }
+                    }
+
+                    // 如果未成功且还有剩余重试次数，稍作等待后继续尝试
+                    if (attempt < totalAttempts && !isStopped) {
+                        try {
+                            Thread.sleep(800);
+                        } catch (InterruptedException e) {
+                            break;
+                        }
                     }
                 }
 
+                // 达到最大重试次数依然失败
                 downloadFailed = true;
-                failReason = (reason != null && !"OK".equals(reason)) ? reason : "下载音频流失败";
+                failReason = lastError != null ? lastError : "网络超时且重试失败";
                 if (listener != null && !isStopped) {
                     listener.onError(failReason);
                 }
@@ -130,8 +176,11 @@ public class LocalStreamProxy {
             conn = (HttpURLConnection) url.openConnection();
             conn.setInstanceFollowRedirects(false);
             conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; U; Android 4.2.2; zh-cn) AppleWebKit/534.30");
-            conn.setConnectTimeout(8000);
-            conn.setReadTimeout(15000);
+
+            // 动态关联设置的超时时长（秒转毫秒）
+            int timeoutMs = configTimeoutSec * 1000;
+            conn.setConnectTimeout(timeoutMs);
+            conn.setReadTimeout(timeoutMs);
 
             if (conn instanceof HttpsURLConnection) {
                 HttpsURLConnection httpsConn = (HttpsURLConnection) conn;
@@ -264,7 +313,7 @@ public class LocalStreamProxy {
                 RandomAccessFile raf = null;
                 OutputStream os = null;
                 try {
-                    client.setSoTimeout(15000);
+                    client.setSoTimeout(configTimeoutSec * 1000);
                     InputStream cis = client.getInputStream();
                     os = client.getOutputStream();
 
@@ -279,11 +328,12 @@ public class LocalStreamProxy {
                         rangeStart = Long.parseLong(m.group(1));
                     }
 
-                    // 关键修复：仅等待首批数据就绪，绝不强制空转 48KB 阻塞阶段
+                    // 等待响应头就绪的时长与配置中的单次超时秒数严格对齐
+                    long waitTimeoutMs = configTimeoutSec * 1000L;
                     long waitStart = System.currentTimeMillis();
                     while (!isHeaderReady && !downloadFinished && !downloadFailed && !isStopped) {
-                        if (System.currentTimeMillis() - waitStart > 6000) break;
-                        Thread.sleep(15);
+                        if (System.currentTimeMillis() - waitStart > waitTimeoutMs) break;
+                        Thread.sleep(20);
                     }
 
                     if (downloadFailed || isStopped) {
@@ -307,7 +357,6 @@ public class LocalStreamProxy {
                     resp.append("Accept-Ranges: bytes\r\n");
                     resp.append("Connection: close\r\n\r\n");
 
-                    // 立即将响应头发送给 MediaPlayer，使其实体握手成功
                     os.write(resp.toString().getBytes());
                     os.flush();
 
