@@ -3379,10 +3379,8 @@ public class MainActivity extends Activity {
             if (flVinylDisc.getAnimation() == null) {
                 flVinylDisc.startAnimation(vinylRotateAnim);
             }
-            if (viewTonearm != null) viewTonearm.setPlaying(true);
         } else {
             flVinylDisc.clearAnimation();
-            if (viewTonearm != null) viewTonearm.setPlaying(false);
         }
     }
 
@@ -3653,7 +3651,6 @@ public class MainActivity extends Activity {
         super.onStart();
         IntentFilter filter = new IntentFilter(MusicService.BROADCAST_STATUS);
         registerReceiver(statusReceiver, filter);
-        startService(new Intent(this, MusicService.class).setAction(MusicService.ACTION_QUERY_STATUS));
     }
 
     @Override
