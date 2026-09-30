@@ -43,6 +43,7 @@ public class LocalStreamProxy {
     private volatile boolean isStopped = false;
     private volatile boolean downloadFinished = false;
     private volatile boolean downloadFailed = false;
+    private volatile boolean isHeaderReady = false;
     private volatile String failReason = "";
 
     private volatile long downloadedBytes = 0;
@@ -80,13 +81,15 @@ public class LocalStreamProxy {
         downloadThread = new Thread(new Runnable() {
             @Override
             public void run() {
-                // 确保底层 TLS 1.2 握手处于就绪状态
                 TLSSocketFactory.install();
 
                 String reason = runDownloadPipeline(originalStreamUrl, 0);
                 if (isStopped) return;
 
                 if ("OK".equals(reason) && CacheManager.isValidAudioFile(tmpFile)) {
+                    if (targetFile.exists()) {
+                        targetFile.delete();
+                    }
                     if (tmpFile.renameTo(targetFile)) {
                         targetFile.setLastModified(System.currentTimeMillis());
                         downloadFinished = true;
@@ -130,7 +133,6 @@ public class LocalStreamProxy {
             conn.setConnectTimeout(8000);
             conn.setReadTimeout(15000);
 
-            // 强制适配 HTTPS 现代 CDN
             if (conn instanceof HttpsURLConnection) {
                 HttpsURLConnection httpsConn = (HttpsURLConnection) conn;
                 httpsConn.setSSLSocketFactory(new TLSSocketFactory());
@@ -205,6 +207,7 @@ public class LocalStreamProxy {
             fos.write(previewBuf, 0, previewRead);
             fos.flush();
             downloadedBytes = previewRead;
+            isHeaderReady = true;
 
             byte[] buf = new byte[16384];
             int r;
@@ -276,10 +279,11 @@ public class LocalStreamProxy {
                         rangeStart = Long.parseLong(m.group(1));
                     }
 
+                    // 关键修复：仅等待首批数据就绪，绝不强制空转 48KB 阻塞阶段
                     long waitStart = System.currentTimeMillis();
-                    while (downloadedBytes < 48 * 1024 && !downloadFinished && !downloadFailed && !isStopped) {
-                        if (System.currentTimeMillis() - waitStart > 12000) break;
-                        Thread.sleep(25);
+                    while (!isHeaderReady && !downloadFinished && !downloadFailed && !isStopped) {
+                        if (System.currentTimeMillis() - waitStart > 6000) break;
+                        Thread.sleep(15);
                     }
 
                     if (downloadFailed || isStopped) {
@@ -303,6 +307,7 @@ public class LocalStreamProxy {
                     resp.append("Accept-Ranges: bytes\r\n");
                     resp.append("Connection: close\r\n\r\n");
 
+                    // 立即将响应头发送给 MediaPlayer，使其实体握手成功
                     os.write(resp.toString().getBytes());
                     os.flush();
 
