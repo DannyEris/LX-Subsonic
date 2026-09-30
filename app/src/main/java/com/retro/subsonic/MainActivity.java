@@ -1863,7 +1863,7 @@ public class MainActivity extends Activity {
                 currentPlazaTagName = "";
                 btnPlazaCategory.setText("全部分类 ▾");
                 setupPlazaSortButtons();
-                isLoadingPlaza = false; // 解除限制，切平台即刻加载
+                isLoadingPlaza = false;
                 loadPlazaSonglists(true);
             }
             @Override public void onNothingSelected(AdapterView<?> parent) {}
@@ -2501,7 +2501,6 @@ public class MainActivity extends Activity {
         });
     }
 
-    // 核心新增：跨平台歌词候选与手动匹配选择弹窗
     private void showLyricPickerDialog() {
         final Dialog dialog = new Dialog(this);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
@@ -2527,7 +2526,7 @@ public class MainActivity extends Activity {
                 final String q = etQuery.getText().toString().trim();
                 if (q.length() == 0) return;
                 displayList.clear();
-                displayList.add("正在检索网易云/酷狗歌词库...");
+                displayList.add("正在检索四大平台 (网易云/酷狗/QQ/酷我) 歌词库...");
                 adapter.notifyDataSetChanged();
 
                 new Thread(new Runnable() {
@@ -2643,7 +2642,6 @@ public class MainActivity extends Activity {
         loadingTv.setGravity(Gravity.CENTER);
         layoutLyricsContainer.addView(loadingTv);
 
-        // 1. 优先读取用户手动绑定的精准自定义歌词
         String customLrc = prefs.getString("custom_lyric_" + songId, null);
         if (customLrc != null && customLrc.trim().length() > 0) {
             currentLoadedRawLyrics = customLrc;
@@ -2656,13 +2654,11 @@ public class MainActivity extends Activity {
             public void run() {
                 String lyricsText = null;
 
-                // 2. 如果是酷狗歌曲，优先调用酷狗专有 hash KRC/LRC 解析接口
                 if (songId != null && songId.startsWith("kg_")) {
                     String hash = songId.substring(3);
                     lyricsText = LxApiHelper.fetchKugouLyricByHash(hash);
                 }
 
-                // 3. Subsonic 服务端原生歌词拉取
                 if (lyricsText == null && songId != null && songId.length() > 0) {
                     try {
                         String res = requestApi("getLyricsBySongId.view?id=" + URLEncoder.encode(songId, "UTF-8") + "&" + getAuthParams());
@@ -2689,7 +2685,6 @@ public class MainActivity extends Activity {
                     }
                 }
 
-                // 4. 网易云等第三方多源静默兜底
                 if (lyricsText == null && title != null) {
                     ArrayList<LxApiHelper.LyricCandidate> candidates = LxApiHelper.searchLyricCandidates(title + " " + (artist != null ? artist : ""));
                     if (!candidates.isEmpty()) {
@@ -2938,6 +2933,7 @@ public class MainActivity extends Activity {
         Toast.makeText(this, "歌词字号: " + lyricBaseFontSize + "sp", Toast.LENGTH_SHORT).show();
     }
 
+    // 核心重构：支持 kg_hash 动态换取封面大图与防盗链适配
     private void loadCoverArt(final String coverId) {
         if (coverId == null || coverId.length() == 0) {
             ivVinylCircularCover.setImageResource(android.R.drawable.ic_menu_report_image);
@@ -2945,23 +2941,59 @@ public class MainActivity extends Activity {
             ivBottomCover.setImageResource(R.drawable.ic_launcher);
             return;
         }
+
         new Thread(new Runnable() {
             @Override
             public void run() {
+                String targetUrl = coverId;
+
+                // 1. 如果是以 kg_hash: 开头的酷狗曲目，动态请求官方接口换取高清原图 URL
+                if (targetUrl.startsWith("kg_hash:")) {
+                    String hash = targetUrl.substring(8);
+                    String fetched = LxApiHelper.fetchKugouSongCover(hash);
+                    if (fetched != null && fetched.length() > 0) {
+                        targetUrl = fetched;
+                    } else {
+                        targetUrl = null;
+                    }
+                } else if (targetUrl.startsWith("kg_")) {
+                    String fetched = LxApiHelper.fetchKugouSongCover(targetUrl.substring(3));
+                    if (fetched != null && fetched.length() > 0) {
+                        targetUrl = fetched;
+                    }
+                }
+
+                if (targetUrl == null || targetUrl.length() == 0) {
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            ivVinylCircularCover.setImageResource(android.R.drawable.ic_menu_report_image);
+                            ivSquareCover.setImageResource(android.R.drawable.ic_menu_report_image);
+                            ivBottomCover.setImageResource(R.drawable.ic_launcher);
+                        }
+                    });
+                    return;
+                }
+
                 String base = prefs.getString("server", "");
                 if (base.endsWith("/")) base = base.substring(0, base.length() - 1);
-                String urlStr = coverId.startsWith("http://") || coverId.startsWith("https://") ? coverId
-                        : (base + "/rest/getCoverArt.view?id=" + coverId + "&size=400&" + getAuthParams());
+                String urlStr = targetUrl.startsWith("http://") || targetUrl.startsWith("https://") ? targetUrl
+                        : (base + "/rest/getCoverArt.view?id=" + targetUrl + "&size=400&" + getAuthParams());
                 try {
                     URL url = new URL(urlStr);
                     HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                     conn.setConnectTimeout(6000);
                     conn.setReadTimeout(6000);
-                    // 补齐酷狗防盗链头
+                    conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36");
+
                     if (urlStr.contains("kugou.com")) {
                         conn.setRequestProperty("Referer", "http://www.kugou.com/");
-                        conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
+                    } else if (urlStr.contains("qq.com")) {
+                        conn.setRequestProperty("Referer", "https://y.qq.com/");
+                    } else if (urlStr.contains("163.com")) {
+                        conn.setRequestProperty("Referer", "https://music.163.com/");
                     }
+
                     if (conn instanceof HttpsURLConnection) {
                         ((HttpsURLConnection) conn).setSSLSocketFactory(new TLSSocketFactory());
                     }
@@ -4110,11 +4142,16 @@ public class MainActivity extends Activity {
             conn = (HttpURLConnection) url.openConnection();
             conn.setConnectTimeout(6000);
             conn.setReadTimeout(6000);
-            // 补齐酷狗防盗链头
+            conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36");
+
             if (urlString.contains("kugou.com")) {
                 conn.setRequestProperty("Referer", "http://www.kugou.com/");
-                conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
+            } else if (urlString.contains("qq.com")) {
+                conn.setRequestProperty("Referer", "https://y.qq.com/");
+            } else if (urlString.contains("163.com")) {
+                conn.setRequestProperty("Referer", "https://music.163.com/");
             }
+
             if (conn instanceof HttpsURLConnection) {
                 ((HttpsURLConnection) conn).setSSLSocketFactory(new TLSSocketFactory());
             }
