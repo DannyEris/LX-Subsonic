@@ -633,7 +633,7 @@
                         android:layout_marginTop="4dp" />
                 </LinearLayout>
 
-                <!-- 6. 设置页 (ScrollView 内部严格保留单一根卡片 LinearLayout) -->
+                <!-- 6. 设置页（修复：ScrollView 内部严格保留唯一的直接子 View） -->
                 <ScrollView
                     android:id="@+id/layout_page_settings"
                     android:layout_width="match_parent"
@@ -775,7 +775,7 @@
                                 android:spinnerMode="dropdown" />
                         </LinearLayout>
 
-                        <!-- 关键修正点：正确置于主卡片内部，绝不在 ScrollView 下产生多余直接子项 -->
+                        <!-- 歌单广场音质配置（安全收拢于主卡片内） -->
                         <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
@@ -958,7 +958,7 @@
                         android:textStyle="bold"
                         android:singleLine="true" />
 
-                    <!-- 底部缓冲百分比指示器 -->
+                    <!-- 底部缓冲进度提示 -->
                     <TextView
                         android:id="@+id/tv_bottom_buffer"
                         android:layout_width="wrap_content"
@@ -1315,7 +1315,7 @@
                         android:background="#16181d"
                         android:paddingLeft="10dp"
                         android:paddingRight="10dp" />
-                    <!-- 详情页缓冲百分比指示器 -->
+                    <!-- 详情页缓冲进度提示 -->
                     <TextView
                         android:id="@+id/tv_detail_buffer"
                         android:layout_width="wrap_content"
