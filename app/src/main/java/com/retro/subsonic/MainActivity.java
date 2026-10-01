@@ -4169,7 +4169,7 @@ public class MainActivity extends Activity {
         return Math.max(1, inSampleSize);
     }
 
-    // 磁盘持久下载器，递归跟踪处理 301/302 重定向
+    // 磁盘持久下载器，递归追踪 301/302 重定向
     private static boolean downloadUrlToFile(String urlString, File destFile) {
         return downloadUrlToFileRecursive(urlString, destFile, 0);
     }
