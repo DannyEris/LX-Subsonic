@@ -96,22 +96,23 @@ public class LxApiHelper {
     private static final Map<String, Map<String, ArrayList<CategoryTag>>> CATEGORY_CACHE = new HashMap<String, Map<String, ArrayList<CategoryTag>>>();
     private static final Map<String, ArrayList<LeaderboardInfo>> LEADERBOARD_CACHE = new HashMap<String, ArrayList<LeaderboardInfo>>();
 
-    // 通用文本清洗：剥离 JSONP 包装 (如 callback(...) 或 MusicJsonCallback(...))
+    // 剥离 JSONP 外壳（如 MusicJsonCallback(...) 或 callback(...)）
     public static String cleanJson(String raw) {
         if (raw == null) return null;
-        int start = raw.indexOf('{');
-        int end = raw.lastIndexOf('}');
-        if (start != -1 && end > start) {
-            return raw.substring(start, end + 1);
+        int startObj = raw.indexOf('{');
+        int endObj = raw.lastIndexOf('}');
+        if (startObj != -1 && endObj > startObj) {
+            return raw.substring(startObj, endObj + 1);
         }
-        start = raw.indexOf('[');
-        end = raw.lastIndexOf(']');
-        if (start != -1 && end > start) {
-            return raw.substring(start, end + 1);
+        int startArr = raw.indexOf('[');
+        int endArr = raw.lastIndexOf(']');
+        if (startArr != -1 && endArr > startArr) {
+            return raw.substring(startArr, endArr + 1);
         }
-        return raw;
+        return raw.trim();
     }
 
+    // 格式化各平台封面尺寸与协议
     public static String formatCoverThumbnail(String url) {
         if (url == null || url.length() == 0) return "";
         try {
@@ -120,8 +121,8 @@ public class LxApiHelper {
                     return url + (url.contains("?") ? "&param=200y200" : "?param=200y200");
                 }
             } else if (url.contains("kugou.com")) {
-                String u = url.replace("{size}", "200");
-                // Android 4.2 严格保持 HTTP，避免酷狗图片 CDN 证书链报错
+                // 酷狗 CDN 只支持特定离散规格（如 150、240、400），替换为 400 确保成功响应
+                String u = url.replace("{size}", "400");
                 if (u.startsWith("https://")) {
                     u = "http://" + u.substring(8);
                 }
@@ -133,22 +134,19 @@ public class LxApiHelper {
         return url;
     }
 
-    // 通过酷狗移动端接口免 Cookie 换取封面大图
+    // 酷狗音乐：通过移动端稳定接口免 Cookie 换取单曲封面
     public static String fetchKugouSongCover(String hash) {
         if (hash == null || hash.length() == 0) return null;
         try {
             String cleanHash = hash.startsWith("kg_") ? hash.substring(3) : hash;
-            String url = "http://mobilecdn.kugou.com/api/v3/song/info?hash=" + cleanHash;
+            String url = "http://m.kugou.com/app/i/getSongInfo.php?cmd=playInfo&hash=" + cleanHash;
             String res = httpGet(url);
             if (res != null) {
                 JSONObject root = new JSONObject(cleanJson(res));
-                JSONObject data = root.optJSONObject("data");
-                if (data != null) {
-                    String img = data.optString("imgUrl", data.optString("album_img", ""));
-                    if (img.length() == 0) img = data.optString("img", "");
-                    if (img.length() > 0) {
-                        return formatCoverThumbnail(img);
-                    }
+                String img = root.optString("imgUrl", root.optString("album_img", ""));
+                if (img.length() == 0) img = root.optString("img", "");
+                if (img.length() > 0) {
+                    return formatCoverThumbnail(img);
                 }
             }
         } catch (Throwable ignored) {}
@@ -629,7 +627,7 @@ public class LxApiHelper {
         return fetchPlaylistSongs(rawPlaylistId, "320K MP3");
     }
 
-    // 严谨防御性解析：QQ 扁平 albummid 读取与酷我类型转换
+    // 核心重构：彻底解决 QQ 扁平字段与酷我新老 10 位 ID 歌单兼容问题
     public static ArrayList<MainActivity.DisplayEntry> fetchPlaylistSongs(String rawPlaylistId, String defaultQuality) {
         ArrayList<MainActivity.DisplayEntry> songs = new ArrayList<MainActivity.DisplayEntry>();
         String qualityLabel = (defaultQuality != null && defaultQuality.length() > 0) ? defaultQuality : "320K MP3";
@@ -725,6 +723,7 @@ public class LxApiHelper {
                                 artist = p[0].trim(); title = p[1].trim();
                             }
                             String hash = o.optString("hash", "");
+                            // 赋予统一钩子标记，播放时自动触发 m.kugou.com 动态补图
                             String coverUrl = (hash.length() > 0) ? ("kg_hash:" + hash) : null;
                             songs.add(new MainActivity.DisplayEntry("kg_" + hash, title, artist, artist + " [" + qualityLabel + "]", coverUrl, qualityLabel, true, bitRateNumeric));
                         }
@@ -732,7 +731,9 @@ public class LxApiHelper {
                 }
             } else if (rawPlaylistId.startsWith("tx_")) {
                 String id = rawPlaylistId.substring(3);
-                String res = httpGet("https://c.y.qq.com/qzone/fcg-bin/fcg_ucc_getcdinfo_byids_cp.fcg?type=1&json=1&utf8=1&onlysong=0&disstid=" + id + "&format=json&inCharset=utf8&outCharset=utf-8&utf8=1");
+                // 补全 loginUin/hostUin/platform/g_tk 缺省参数，防止官方风控拦截返回空
+                String url = "https://c.y.qq.com/qzone/fcg-bin/fcg_ucc_getcdinfo_byids_cp.fcg?type=1&json=1&utf8=1&onlysong=0&disstid=" + id + "&format=json&inCharset=utf8&outCharset=utf-8&loginUin=0&hostUin=0&platform=yqq&g_tk=5381";
+                String res = httpGet(url);
                 if (res != null) {
                     JSONObject root = new JSONObject(cleanJson(res));
                     JSONArray cdlist = root.optJSONArray("cdlist");
@@ -749,7 +750,7 @@ public class LxApiHelper {
                                 if (singer != null && singer.length() > 0) {
                                     artist = singer.getJSONObject(0).optString("name", "QQ歌手");
                                 }
-                                // 安全读取扁平 albummid，杜绝空指针
+                                // 安全读取扁平 albummid，彻底杜绝 optJSONObject("album") 空指针
                                 String albummid = s.optString("albummid", "");
                                 if (albummid.length() == 0) {
                                     JSONObject albObj = s.optJSONObject("album");
@@ -763,21 +764,52 @@ public class LxApiHelper {
                 }
             } else if (rawPlaylistId.startsWith("kw_")) {
                 String id = rawPlaylistId.substring(3);
-                String res = httpGet("http://nplserver.kuwo.cn/pl.s?content=list&id=" + id + "&pn=0&rn=100");
+                // 优先调用兼容所有 10 位新版 ID 的现代接口
+                String url = "http://wapi.kuwo.cn/api/pc/playlist/playListInfo?pid=" + id + "&pn=0&rn=100";
+                String res = httpGet(url);
+                boolean success = false;
                 if (res != null) {
-                    JSONObject root = new JSONObject(cleanJson(res));
-                    JSONArray musiclist = root.optJSONArray("musiclist");
-                    if (musiclist != null) {
-                        for (int i = 0; i < musiclist.length(); i++) {
-                            JSONObject o = musiclist.getJSONObject(i);
-                            String songId = o.optString("id", o.optString("musicrid", ""));
-                            if (songId.length() == 0) continue;
-                            String title = o.optString("name", o.optString("title", "酷我歌曲"));
-                            String artist = o.optString("artist", o.optString("singer", "酷我歌手"));
-                            String pic = o.optString("pic", o.optString("web_albumpic_short", ""));
-                            String cover = pic.length() > 0 ? formatCoverThumbnail(pic) : null;
-                            songs.add(new MainActivity.DisplayEntry("kw_" + songId, title, artist, artist + " [" + qualityLabel + "]", cover, qualityLabel, true, bitRateNumeric));
+                    try {
+                        JSONObject root = new JSONObject(cleanJson(res));
+                        JSONObject data = root.optJSONObject("data");
+                        if (data != null && data.has("musicList")) {
+                            JSONArray arr = data.getJSONArray("musicList");
+                            for (int i = 0; i < arr.length(); i++) {
+                                JSONObject o = arr.getJSONObject(i);
+                                String songId = o.optString("rid", o.optString("id", ""));
+                                if (songId.length() == 0) continue;
+                                String title = o.optString("name", o.optString("title", "酷我歌曲"));
+                                String artist = o.optString("artist", "酷我歌手");
+                                String pic = o.optString("pic", o.optString("web_albumpic_short", ""));
+                                String cover = pic.length() > 0 ? formatCoverThumbnail(pic) : null;
+                                songs.add(new MainActivity.DisplayEntry("kw_" + songId, title, artist, artist + " [" + qualityLabel + "]", cover, qualityLabel, true, bitRateNumeric));
+                            }
+                            success = !songs.isEmpty();
                         }
+                    } catch (Throwable ignored) {}
+                }
+
+                // 兜底备用：旧版历史歌单通道
+                if (!success) {
+                    String oldUrl = "http://nplserver.kuwo.cn/pl.s?content=list&id=" + id + "&pn=0&rn=100";
+                    String oldRes = httpGet(oldUrl);
+                    if (oldRes != null) {
+                        try {
+                            JSONObject root = new JSONObject(cleanJson(oldRes));
+                            JSONArray musiclist = root.optJSONArray("musiclist");
+                            if (musiclist != null) {
+                                for (int i = 0; i < musiclist.length(); i++) {
+                                    JSONObject o = musiclist.getJSONObject(i);
+                                    String songId = o.optString("id", o.optString("musicrid", ""));
+                                    if (songId.length() == 0) continue;
+                                    String title = o.optString("name", o.optString("title", "酷我歌曲"));
+                                    String artist = o.optString("artist", "酷我歌手");
+                                    String pic = o.optString("pic", o.optString("web_albumpic_short", ""));
+                                    String cover = pic.length() > 0 ? formatCoverThumbnail(pic) : null;
+                                    songs.add(new MainActivity.DisplayEntry("kw_" + songId, title, artist, artist + " [" + qualityLabel + "]", cover, qualityLabel, true, bitRateNumeric));
+                                }
+                            }
+                        } catch (Throwable ignored) {}
                     }
                 }
             } else if (rawPlaylistId.startsWith("mg_")) {
@@ -909,7 +941,7 @@ public class LxApiHelper {
 
         String clean = keyword.replaceAll("\\([^)]*\\)", "").replaceAll("\\[[^\\]]*\\]", "").trim();
 
-        // 1. 网易云
+        // 1. 网易云音乐
         try {
             String wyUrl = "https://music.163.com/api/search/get/web?s=" + URLEncoder.encode(clean, "UTF-8") + "&type=1&offset=0&total=true&limit=4";
             String res = httpGet(wyUrl);
@@ -929,7 +961,7 @@ public class LxApiHelper {
             }
         } catch (Throwable ignored) {}
 
-        // 2. 酷狗
+        // 2. 酷狗音乐
         try {
             String kgUrl = "http://mobilecdn.kugou.com/api/v3/search/song?keyword=" + URLEncoder.encode(clean, "UTF-8") + "&page=1&pagesize=4";
             String res = httpGet(kgUrl);
@@ -947,9 +979,9 @@ public class LxApiHelper {
             }
         } catch (Throwable ignored) {}
 
-        // 3. QQ音乐（剥离 JSONP 壳）
+        // 3. QQ音乐：必须携带 g_tk=5381，剥离 JSONP 壳
         try {
-            String txUrl = "https://c.y.qq.com/soso/fcgi-bin/client_search_cp?p=1&n=4&w=" + URLEncoder.encode(clean, "UTF-8") + "&format=json";
+            String txUrl = "https://c.y.qq.com/soso/fcgi-bin/client_search_cp?p=1&n=4&w=" + URLEncoder.encode(clean, "UTF-8") + "&format=json&g_tk=5381&inCharset=utf8&outCharset=utf-8";
             String res = httpGet(txUrl);
             if (res != null) {
                 JSONObject root = new JSONObject(cleanJson(res));
@@ -973,34 +1005,42 @@ public class LxApiHelper {
             }
         } catch (Throwable ignored) {}
 
-        // 4. 酷我（采用强力正则匹配，不依赖格式脆弱的非标准 JSON 解析）
+        // 4. 酷我音乐：单引号转换为标准双引号 JSON，直接解析 abslist
         try {
             String kwUrl = "http://search.kuwo.cn/r.s?all=" + URLEncoder.encode(clean, "UTF-8") + "&ft=music&item=4&pn=0&rformat=json&encoding=utf8";
             String res = httpGet(kwUrl);
             if (res != null) {
-                Pattern p1 = Pattern.compile("(?i)MUSICRID[\\s:=]+['\"]?(?:MUSIC_)?(\\d+)['\"]?[^}]*?SONGNAME[\\s:=]+['\"]?([^'\",}]+)['\"]?[^}]*?ARTIST[\\s:=]+['\"]?([^'\",}]+)['\"]?");
-                Matcher m1 = p1.matcher(res);
-                while (m1.find()) {
-                    candidates.add(new LyricCandidate("kw", m1.group(1), m1.group(2).trim(), m1.group(3).trim(), ""));
-                }
-                if (candidates.isEmpty() || !hasKwCandidate(candidates)) {
-                    Pattern p2 = Pattern.compile("(?i)SONGNAME[\\s:=]+['\"]?([^'\",}]+)['\"]?[^}]*?ARTIST[\\s:=]+['\"]?([^'\",}]+)['\"]?[^}]*?MUSICRID[\\s:=]+['\"]?(?:MUSIC_)?(\\d+)['\"]?");
-                    Matcher m2 = p2.matcher(res);
-                    while (m2.find()) {
-                        candidates.add(new LyricCandidate("kw", m2.group(3), m2.group(1).trim(), m2.group(2).trim(), ""));
+                String standardJson = cleanJson(res).replace('\'', '"');
+                try {
+                    JSONObject root = new JSONObject(standardJson);
+                    JSONArray abslist = root.optJSONArray("abslist");
+                    if (abslist != null) {
+                        for (int i = 0; i < abslist.length(); i++) {
+                            JSONObject s = abslist.getJSONObject(i);
+                            String rid = s.optString("MUSICRID", "").replace("MUSIC_", "");
+                            String name = s.optString("SONGNAME", "");
+                            String art = s.optString("ARTIST", "");
+                            if (rid.length() > 0) {
+                                candidates.add(new LyricCandidate("kw", rid, name, art, ""));
+                            }
+                        }
+                    }
+                } catch (Throwable e) {
+                    // 容错备用正则：兼容任意字段乱序
+                    Pattern p = Pattern.compile("(?i)(?:MUSICRID[\\s:=]+['\"]?(?:MUSIC_)?(\\d+)['\"][^}]*?SONGNAME[\\s:=]+['\"]([^'\"]+)['\"][^}]*?ARTIST[\\s:=]+['\"]([^'\"]+)['\"])|(?:ARTIST[\\s:=]+['\"]([^'\"]+)['\"][^}]*?SONGNAME[\\s:=]+['\"]([^'\"]+)['\"][^}]*?MUSICRID[\\s:=]+['\"]?(?:MUSIC_)?(\\d+)['\"])");
+                    Matcher m = p.matcher(res);
+                    while (m.find()) {
+                        if (m.group(1) != null) {
+                            candidates.add(new LyricCandidate("kw", m.group(1), m.group(2).trim(), m.group(3).trim(), ""));
+                        } else if (m.group(6) != null) {
+                            candidates.add(new LyricCandidate("kw", m.group(6), m.group(5).trim(), m.group(4).trim(), ""));
+                        }
                     }
                 }
             }
         } catch (Throwable ignored) {}
 
         return candidates;
-    }
-
-    private static boolean hasKwCandidate(ArrayList<LyricCandidate> list) {
-        for (LyricCandidate c : list) {
-            if ("kw".equals(c.source)) return true;
-        }
-        return false;
     }
 
     // 从候选目标下载歌词文本
@@ -1016,7 +1056,7 @@ public class LxApiHelper {
             } else if ("kg".equals(c.source)) {
                 return fetchKugouLyricByHash(c.id);
             } else if ("tx".equals(c.source)) {
-                String txUrl = "https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid=" + c.id + "&format=json&nobase64=1";
+                String txUrl = "https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid=" + c.id + "&format=json&nobase64=1&g_tk=5381&loginUin=0&hostUin=0&inCharset=utf8&outCharset=utf-8";
                 String res = httpGet(txUrl);
                 if (res != null) {
                     JSONObject root = new JSONObject(cleanJson(res));
