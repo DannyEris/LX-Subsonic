@@ -2984,85 +2984,74 @@ public class MainActivity extends Activity {
 
     // 播放器封面解析核心，集成酷狗 Hash 动态换图与 302 重定向
     private void loadCoverArt(final String coverId) {
-        if (coverId == null || coverId.length() == 0) {
-            ivVinylCircularCover.setImageResource(android.R.drawable.ic_menu_report_image);
-            ivSquareCover.setImageResource(android.R.drawable.ic_menu_report_image);
-            ivBottomCover.setImageResource(R.drawable.ic_launcher);
-            return;
-        }
-
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                String targetUrl = coverId;
-
-                if (targetUrl.startsWith("kg_hash:")) {
-                    String hash = targetUrl.substring(8);
-                    String fetched = LxApiHelper.fetchKugouSongCover(hash);
-                    if (fetched != null && fetched.length() > 0) {
-                        targetUrl = fetched;
-                    } else {
-                        targetUrl = null;
-                    }
-                } else if (targetUrl.startsWith("kg_")) {
-                    String hash = targetUrl.substring(3);
-                    String fetched = LxApiHelper.fetchKugouSongCover(hash);
-                    if (fetched != null && fetched.length() > 0) {
-                        targetUrl = fetched;
-                    }
-                }
-
-                if (targetUrl == null || targetUrl.length() == 0) {
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            ivVinylCircularCover.setImageResource(android.R.drawable.ic_menu_report_image);
-                            ivSquareCover.setImageResource(android.R.drawable.ic_menu_report_image);
-                            ivBottomCover.setImageResource(R.drawable.ic_launcher);
-                        }
-                    });
-                    return;
-                }
-
-                String base = prefs.getString("server", "");
-                if (base.endsWith("/")) base = base.substring(0, base.length() - 1);
-                String urlStr = targetUrl.startsWith("http://") || targetUrl.startsWith("https://") ? targetUrl
-                        : (base + "/rest/getCoverArt.view?id=" + targetUrl + "&size=400&" + getAuthParams());
-
-                final Bitmap bmp = fetchBitmapWithRedirect(urlStr, 0);
-                if (bmp != null) {
-                    final Bitmap circular = getCircularBitmap(bmp, 240);
-                    float density = getResources().getDisplayMetrics().density;
-                    final Bitmap bottomRounded = getRoundedCornerBitmap(bmp, (int) (95 * density), 10 * density);
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            if (currentRawCoverBitmap != null && !currentRawCoverBitmap.isRecycled()) currentRawCoverBitmap.recycle();
-                            if (currentCircularCoverBitmap != null && !currentCircularCoverBitmap.isRecycled()) currentCircularCoverBitmap.recycle();
-                            if (currentBottomCoverBitmap != null && !currentBottomCoverBitmap.isRecycled()) currentBottomCoverBitmap.recycle();
-
-                            currentRawCoverBitmap = bmp;
-                            currentCircularCoverBitmap = circular;
-                            currentBottomCoverBitmap = bottomRounded;
-
-                            ivVinylCircularCover.setImageBitmap(circular);
-                            ivSquareCover.setImageBitmap(bmp);
-                            ivBottomCover.setImageBitmap(bottomRounded);
-                        }
-                    });
-                } else {
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            ivVinylCircularCover.setImageResource(android.R.drawable.ic_menu_report_image);
-                            ivSquareCover.setImageResource(android.R.drawable.ic_menu_report_image);
-                            ivBottomCover.setImageResource(R.drawable.ic_launcher);
-                        }
-                    });
-                }
-            }
-        }).start();
+    if (coverId == null || coverId.length() == 0) {
+        resetDefaultCover();
+        return;
     }
+
+    new Thread(new Runnable() {
+        @Override
+        public void run() {
+            String targetUrl = coverId;
+
+            // 遇到酷狗 Hash，异步换取单曲自身的真实大图
+            if (targetUrl.startsWith("kg_hash:")) {
+                String hash = targetUrl.substring(8);
+                targetUrl = LxApiHelper.fetchKugouSongCover(hash);
+            } else if (targetUrl.startsWith("kg_")) {
+                targetUrl = LxApiHelper.fetchKugouSongCover(targetUrl.substring(3));
+            }
+
+            // 若单曲未找到独立封面，直接降级为默认占位图，严禁混入歌单图
+            if (targetUrl == null || targetUrl.length() == 0) {
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() { resetDefaultCover(); }
+                });
+                return;
+            }
+
+            String base = prefs.getString("server", "");
+            if (base.endsWith("/")) base = base.substring(0, base.length() - 1);
+            String urlStr = targetUrl.startsWith("http://") || targetUrl.startsWith("https://") ? targetUrl
+                    : (base + "/rest/getCoverArt.view?id=" + targetUrl + "&size=400&" + getAuthParams());
+
+            // 调用支持 302 重定向递归追踪的方法拉取图片
+            final Bitmap bmp = fetchBitmapWithRedirect(urlStr, 0);
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    if (bmp != null) {
+                        applyCoverBitmaps(bmp);
+                    } else {
+                        resetDefaultCover();
+                    }
+                }
+            });
+        }
+    }).start();
+}
+
+private void resetDefaultCover() {
+    ivVinylCircularCover.setImageResource(android.R.drawable.ic_menu_report_image);
+    ivSquareCover.setImageResource(android.R.drawable.ic_menu_report_image);
+    ivBottomCover.setImageResource(R.drawable.ic_launcher);
+}
+
+private void applyCoverBitmaps(Bitmap bmp) {
+    if (currentRawCoverBitmap != null && !currentRawCoverBitmap.isRecycled()) currentRawCoverBitmap.recycle();
+    if (currentCircularCoverBitmap != null && !currentCircularCoverBitmap.isRecycled()) currentCircularCoverBitmap.recycle();
+    if (currentBottomCoverBitmap != null && !currentBottomCoverBitmap.isRecycled()) currentBottomCoverBitmap.recycle();
+
+    currentRawCoverBitmap = bmp;
+    currentCircularCoverBitmap = getCircularBitmap(bmp, 240);
+    float density = getResources().getDisplayMetrics().density;
+    currentBottomCoverBitmap = getRoundedCornerBitmap(bmp, (int) (95 * density), 10 * density);
+
+    ivVinylCircularCover.setImageBitmap(currentCircularCoverBitmap);
+    ivSquareCover.setImageBitmap(bmp);
+    ivBottomCover.setImageBitmap(currentBottomCoverBitmap);
+}
 
     private Bitmap getCircularBitmap(Bitmap bitmap, int targetSize) {
         Bitmap output = Bitmap.createBitmap(targetSize, targetSize, Bitmap.Config.ARGB_8888);
