@@ -2933,7 +2933,56 @@ public class MainActivity extends Activity {
         Toast.makeText(this, "歌词字号: " + lyricBaseFontSize + "sp", Toast.LENGTH_SHORT).show();
     }
 
-    // 核心重构：支持 kg_hash 动态换取封面大图与防盗链适配
+    // 递归处理 301/302 重定向并下载解码位图
+    private Bitmap fetchBitmapWithRedirect(String urlStr, int depth) {
+        if (depth > 5 || urlStr == null) return null;
+        HttpURLConnection conn = null;
+        InputStream is = null;
+        try {
+            TLSSocketFactory.install();
+            URL url = new URL(urlStr);
+            conn = (HttpURLConnection) url.openConnection();
+            conn.setInstanceFollowRedirects(false);
+            conn.setConnectTimeout(7000);
+            conn.setReadTimeout(7000);
+            conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36");
+
+            if (urlStr.contains("kugou.com")) {
+                conn.setRequestProperty("Referer", "http://www.kugou.com/");
+            } else if (urlStr.contains("qq.com")) {
+                conn.setRequestProperty("Referer", "https://y.qq.com/");
+            } else if (urlStr.contains("163.com")) {
+                conn.setRequestProperty("Referer", "https://music.163.com/");
+            }
+
+            if (conn instanceof HttpsURLConnection) {
+                ((HttpsURLConnection) conn).setSSLSocketFactory(new TLSSocketFactory());
+            }
+
+            int code = conn.getResponseCode();
+            if (code == 301 || code == 302 || code == 303 || code == 307) {
+                String loc = conn.getHeaderField("Location");
+                conn.disconnect();
+                if (loc != null && loc.length() > 0) {
+                    URL nextUrl = new URL(url, loc);
+                    return fetchBitmapWithRedirect(nextUrl.toString(), depth + 1);
+                }
+                return null;
+            }
+
+            if (code == 200) {
+                is = conn.getInputStream();
+                return BitmapFactory.decodeStream(is);
+            }
+        } catch (Throwable ignored) {
+        } finally {
+            try { if (is != null) is.close(); } catch (Exception ignored) {}
+            if (conn != null) conn.disconnect();
+        }
+        return null;
+    }
+
+    // 播放器封面解析核心，集成酷狗 Hash 动态换图与 302 重定向
     private void loadCoverArt(final String coverId) {
         if (coverId == null || coverId.length() == 0) {
             ivVinylCircularCover.setImageResource(android.R.drawable.ic_menu_report_image);
@@ -2947,7 +2996,6 @@ public class MainActivity extends Activity {
             public void run() {
                 String targetUrl = coverId;
 
-                // 1. 如果是以 kg_hash: 开头的酷狗曲目，动态请求官方接口换取高清原图 URL
                 if (targetUrl.startsWith("kg_hash:")) {
                     String hash = targetUrl.substring(8);
                     String fetched = LxApiHelper.fetchKugouSongCover(hash);
@@ -2957,7 +3005,8 @@ public class MainActivity extends Activity {
                         targetUrl = null;
                     }
                 } else if (targetUrl.startsWith("kg_")) {
-                    String fetched = LxApiHelper.fetchKugouSongCover(targetUrl.substring(3));
+                    String hash = targetUrl.substring(3);
+                    String fetched = LxApiHelper.fetchKugouSongCover(hash);
                     if (fetched != null && fetched.length() > 0) {
                         targetUrl = fetched;
                     }
@@ -2979,50 +3028,38 @@ public class MainActivity extends Activity {
                 if (base.endsWith("/")) base = base.substring(0, base.length() - 1);
                 String urlStr = targetUrl.startsWith("http://") || targetUrl.startsWith("https://") ? targetUrl
                         : (base + "/rest/getCoverArt.view?id=" + targetUrl + "&size=400&" + getAuthParams());
-                try {
-                    URL url = new URL(urlStr);
-                    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-                    conn.setConnectTimeout(6000);
-                    conn.setReadTimeout(6000);
-                    conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36");
 
-                    if (urlStr.contains("kugou.com")) {
-                        conn.setRequestProperty("Referer", "http://www.kugou.com/");
-                    } else if (urlStr.contains("qq.com")) {
-                        conn.setRequestProperty("Referer", "https://y.qq.com/");
-                    } else if (urlStr.contains("163.com")) {
-                        conn.setRequestProperty("Referer", "https://music.163.com/");
-                    }
+                final Bitmap bmp = fetchBitmapWithRedirect(urlStr, 0);
+                if (bmp != null) {
+                    final Bitmap circular = getCircularBitmap(bmp, 240);
+                    float density = getResources().getDisplayMetrics().density;
+                    final Bitmap bottomRounded = getRoundedCornerBitmap(bmp, (int) (95 * density), 10 * density);
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (currentRawCoverBitmap != null && !currentRawCoverBitmap.isRecycled()) currentRawCoverBitmap.recycle();
+                            if (currentCircularCoverBitmap != null && !currentCircularCoverBitmap.isRecycled()) currentCircularCoverBitmap.recycle();
+                            if (currentBottomCoverBitmap != null && !currentBottomCoverBitmap.isRecycled()) currentBottomCoverBitmap.recycle();
 
-                    if (conn instanceof HttpsURLConnection) {
-                        ((HttpsURLConnection) conn).setSSLSocketFactory(new TLSSocketFactory());
-                    }
-                    InputStream is = conn.getInputStream();
-                    final Bitmap bmp = BitmapFactory.decodeStream(is);
-                    is.close();
-                    conn.disconnect();
-                    if (bmp != null) {
-                        final Bitmap circular = getCircularBitmap(bmp, 240);
-                        float density = getResources().getDisplayMetrics().density;
-                        final Bitmap bottomRounded = getRoundedCornerBitmap(bmp, (int) (95 * density), 10 * density);
-                        runOnUiThread(new Runnable() {
-                            @Override
-                            public void run() {
-                                if (currentRawCoverBitmap != null && !currentRawCoverBitmap.isRecycled()) currentRawCoverBitmap.recycle();
-                                if (currentCircularCoverBitmap != null && !currentCircularCoverBitmap.isRecycled()) currentCircularCoverBitmap.recycle();
-                                if (currentBottomCoverBitmap != null && !currentBottomCoverBitmap.isRecycled()) currentBottomCoverBitmap.recycle();
+                            currentRawCoverBitmap = bmp;
+                            currentCircularCoverBitmap = circular;
+                            currentBottomCoverBitmap = bottomRounded;
 
-                                currentRawCoverBitmap = bmp;
-                                currentCircularCoverBitmap = circular;
-                                currentBottomCoverBitmap = bottomRounded;
-
-                                ivVinylCircularCover.setImageBitmap(circular);
-                                ivSquareCover.setImageBitmap(bmp);
-                                ivBottomCover.setImageBitmap(bottomRounded);
-                            }
-                        });
-                    }
-                } catch (Exception ignored) {}
+                            ivVinylCircularCover.setImageBitmap(circular);
+                            ivSquareCover.setImageBitmap(bmp);
+                            ivBottomCover.setImageBitmap(bottomRounded);
+                        }
+                    });
+                } else {
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            ivVinylCircularCover.setImageResource(android.R.drawable.ic_menu_report_image);
+                            ivSquareCover.setImageResource(android.R.drawable.ic_menu_report_image);
+                            ivBottomCover.setImageResource(R.drawable.ic_launcher);
+                        }
+                    });
+                }
             }
         }).start();
     }
@@ -4132,16 +4169,24 @@ public class MainActivity extends Activity {
         return Math.max(1, inSampleSize);
     }
 
+    // 磁盘持久下载器，递归跟踪处理 301/302 重定向
     private static boolean downloadUrlToFile(String urlString, File destFile) {
+        return downloadUrlToFileRecursive(urlString, destFile, 0);
+    }
+
+    private static boolean downloadUrlToFileRecursive(String urlString, File destFile, int depth) {
+        if (depth > 5 || urlString == null) return false;
         File tmp = new File(destFile.getAbsolutePath() + ".tmp");
         HttpURLConnection conn = null;
         InputStream is = null;
         FileOutputStream fos = null;
         try {
+            TLSSocketFactory.install();
             URL url = new URL(urlString);
             conn = (HttpURLConnection) url.openConnection();
-            conn.setConnectTimeout(6000);
-            conn.setReadTimeout(6000);
+            conn.setInstanceFollowRedirects(false);
+            conn.setConnectTimeout(7000);
+            conn.setReadTimeout(7000);
             conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36");
 
             if (urlString.contains("kugou.com")) {
@@ -4155,7 +4200,19 @@ public class MainActivity extends Activity {
             if (conn instanceof HttpsURLConnection) {
                 ((HttpsURLConnection) conn).setSSLSocketFactory(new TLSSocketFactory());
             }
-            if (conn.getResponseCode() == 200) {
+
+            int code = conn.getResponseCode();
+            if (code == 301 || code == 302 || code == 303 || code == 307) {
+                String loc = conn.getHeaderField("Location");
+                conn.disconnect();
+                if (loc != null && loc.length() > 0) {
+                    URL nextUrl = new URL(url, loc);
+                    return downloadUrlToFileRecursive(nextUrl.toString(), destFile, depth + 1);
+                }
+                return false;
+            }
+
+            if (code == 200) {
                 is = conn.getInputStream();
                 fos = new FileOutputStream(tmp);
                 byte[] buf = new byte[4096];
