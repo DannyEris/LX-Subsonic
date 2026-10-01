@@ -116,17 +116,17 @@ public class LxApiHelper {
     public static String formatCoverThumbnail(String url) {
         if (url == null || url.length() == 0) return "";
         try {
-            if (url.contains("126.net") || url.contains("163.com")) {
-                if (!url.contains("param=")) {
-                    return url + (url.contains("?") ? "&param=200y200" : "?param=200y200");
-                }
-            } else if (url.contains("kugou.com")) {
-                // 酷狗 CDN 只支持特定离散规格（如 150、240、400），替换为 400 确保成功响应
+            if (url.contains("kugou.com")) {
+                // 必须替换为合法离散尺寸 400，避免 404
                 String u = url.replace("{size}", "400");
                 if (u.startsWith("https://")) {
                     u = "http://" + u.substring(8);
                 }
                 return u;
+            } else if (url.contains("126.net") || url.contains("163.com")) {
+                if (!url.contains("param=")) {
+                    return url + (url.contains("?") ? "&param=200y200" : "?param=200y200");
+                }
             } else if (url.contains("gtimg.cn") || url.contains("qq.com")) {
                 if (url.contains("300x300")) return url.replace("300x300", "150x150");
             }
@@ -473,13 +473,26 @@ public class LxApiHelper {
                 String res = httpGet(url);
                 if (res != null) {
                     JSONObject root = new JSONObject(cleanJson(res));
-                    if (root.has("data") && root.getJSONObject("data").has("info")) {
-                        JSONArray arr = root.getJSONObject("data").getJSONArray("info");
+                    JSONObject data = root.optJSONObject("data");
+                    if (data != null && data.has("info")) {
+                        JSONArray arr = data.getJSONArray("info");
                         for (int i = 0; i < arr.length(); i++) {
                             JSONObject o = arr.getJSONObject(i);
-                            list.add(new PlaylistInfo("kg_" + o.getString("specialid"), o.getString("specialname"),
-                                    o.optString("nickname", "酷狗音乐"), formatCoverThumbnail(o.optString("imgurl", "")),
-                                    o.optString("playcount", ""), "kg"));
+
+                            // 多态字段兼容提取封面
+                            String rawCover = o.optString("imgurl", "");
+                            if (rawCover.length() == 0) rawCover = o.optString("special_icon", "");
+                            if (rawCover.length() == 0) rawCover = o.optString("pic", "");
+                            if (rawCover.length() == 0) rawCover = o.optString("flexible_cover", "");
+
+                            list.add(new PlaylistInfo(
+                                    "kg_" + o.getString("specialid"),
+                                    o.getString("specialname"),
+                                    o.optString("nickname", "酷狗音乐"),
+                                    formatCoverThumbnail(rawCover),
+                                    o.optString("playcount", ""),
+                                    "kg"
+                            ));
                         }
                     }
                 }
@@ -712,20 +725,27 @@ public class LxApiHelper {
                 String res = httpGet("http://mobilecdn.kugou.com/api/v3/special/song?specialid=" + id + "&pagesize=100&page=1");
                 if (res != null) {
                     JSONObject root = new JSONObject(cleanJson(res));
-                    if (root.has("data") && root.getJSONObject("data").has("info")) {
-                        JSONArray arr = root.getJSONObject("data").getJSONArray("info");
+                    JSONObject data = root.optJSONObject("data");
+                    if (data != null && data.has("info")) {
+                        JSONArray arr = data.getJSONArray("info");
                         for (int i = 0; i < arr.length(); i++) {
                             JSONObject o = arr.getJSONObject(i);
                             String filename = o.optString("filename", "");
                             String title = filename, artist = "酷狗歌手";
                             if (filename.contains(" - ")) {
                                 String[] p = filename.split(" - ", 2);
-                                artist = p[0].trim(); title = p[1].trim();
+                                artist = p[0].trim();
+                                title = p[1].trim();
                             }
                             String hash = o.optString("hash", "");
-                            // 赋予统一钩子标记，播放时自动触发 m.kugou.com 动态补图
-                            String coverUrl = (hash.length() > 0) ? ("kg_hash:" + hash) : null;
-                            songs.add(new MainActivity.DisplayEntry("kg_" + hash, title, artist, artist + " [" + qualityLabel + "]", coverUrl, qualityLabel, true, bitRateNumeric));
+
+                            // 标记为单曲专有 Hash 钩子，禁止 fallback 到歌单封面
+                            String songCoverHook = hash.length() > 0 ? ("kg_hash:" + hash) : null;
+
+                            songs.add(new MainActivity.DisplayEntry(
+                                    "kg_" + hash, title, artist, 
+                                    artist + " [" + qualityLabel + "]", 
+                                    songCoverHook, qualityLabel, true, bitRateNumeric));
                         }
                     }
                 }
@@ -764,49 +784,64 @@ public class LxApiHelper {
                 }
             } else if (rawPlaylistId.startsWith("kw_")) {
                 String id = rawPlaylistId.substring(3);
-                // 优先调用兼容所有 10 位新版 ID 的现代接口
-                String url = "http://wapi.kuwo.cn/api/pc/playlist/playListInfo?pid=" + id + "&pn=0&rn=100";
-                String res = httpGet(url);
-                boolean success = false;
-                if (res != null) {
+
+                // 通道 1：酷我移动客户端无风控接口（推荐，稳定免 token）
+                String mobileUrl = "http://mobileinterfaces.kuwo.cn/er.s?type=get_pc_lz_data&mid=&mobi=1&plid=" + id + "&pn=1&rn=100";
+                String mobileRes = httpGet(mobileUrl);
+
+                if (mobileRes != null) {
                     try {
-                        JSONObject root = new JSONObject(cleanJson(res));
-                        JSONObject data = root.optJSONObject("data");
-                        if (data != null && data.has("musicList")) {
-                            JSONArray arr = data.getJSONArray("musicList");
-                            for (int i = 0; i < arr.length(); i++) {
-                                JSONObject o = arr.getJSONObject(i);
-                                String songId = o.optString("rid", o.optString("id", ""));
+                        JSONObject root = new JSONObject(cleanJson(mobileRes));
+                        JSONArray listArr = root.optJSONArray("musiclist");
+                        if (listArr == null && root.optJSONObject("data") != null) {
+                            listArr = root.optJSONObject("data").optJSONArray("musicList");
+                        }
+                        if (listArr != null && listArr.length() > 0) {
+                            for (int i = 0; i < listArr.length(); i++) {
+                                JSONObject o = listArr.getJSONObject(i);
+                                String songId = o.optString("id", o.optString("rid", ""));
                                 if (songId.length() == 0) continue;
-                                String title = o.optString("name", o.optString("title", "酷我歌曲"));
-                                String artist = o.optString("artist", "酷我歌手");
+
+                                String title = o.optString("name", o.optString("songName", "未知歌曲"));
+                                String artist = o.optString("artist", o.optString("singer", "酷我歌手"));
                                 String pic = o.optString("pic", o.optString("web_albumpic_short", ""));
                                 String cover = pic.length() > 0 ? formatCoverThumbnail(pic) : null;
-                                songs.add(new MainActivity.DisplayEntry("kw_" + songId, title, artist, artist + " [" + qualityLabel + "]", cover, qualityLabel, true, bitRateNumeric));
+
+                                songs.add(new MainActivity.DisplayEntry(
+                                        "kw_" + songId, title, artist, 
+                                        artist + " [" + qualityLabel + "]", 
+                                        cover, qualityLabel, true, bitRateNumeric));
                             }
-                            success = !songs.isEmpty();
                         }
                     } catch (Throwable ignored) {}
                 }
 
-                // 兜底备用：旧版历史歌单通道
-                if (!success) {
-                    String oldUrl = "http://nplserver.kuwo.cn/pl.s?content=list&id=" + id + "&pn=0&rn=100";
-                    String oldRes = httpGet(oldUrl);
-                    if (oldRes != null) {
+                // 通道 2：若移动端未取到数据，降级至 Web API（带 csrf/token 伪装头）
+                if (songs.isEmpty()) {
+                    String webUrl = "http://wapi.kuwo.cn/api/pc/playlist/playListInfo?pid=" + id + "&pn=0&rn=100";
+                    String webRes = httpGet(webUrl);
+                    if (webRes != null) {
                         try {
-                            JSONObject root = new JSONObject(cleanJson(oldRes));
-                            JSONArray musiclist = root.optJSONArray("musiclist");
-                            if (musiclist != null) {
-                                for (int i = 0; i < musiclist.length(); i++) {
-                                    JSONObject o = musiclist.getJSONObject(i);
-                                    String songId = o.optString("id", o.optString("musicrid", ""));
-                                    if (songId.length() == 0) continue;
-                                    String title = o.optString("name", o.optString("title", "酷我歌曲"));
-                                    String artist = o.optString("artist", "酷我歌手");
-                                    String pic = o.optString("pic", o.optString("web_albumpic_short", ""));
-                                    String cover = pic.length() > 0 ? formatCoverThumbnail(pic) : null;
-                                    songs.add(new MainActivity.DisplayEntry("kw_" + songId, title, artist, artist + " [" + qualityLabel + "]", cover, qualityLabel, true, bitRateNumeric));
+                            JSONObject root = new JSONObject(cleanJson(webRes));
+                            JSONObject data = root.optJSONObject("data");
+                            if (data != null) {
+                                JSONArray arr = data.optJSONArray("musicList");
+                                if (arr != null && arr.length() > 0) {
+                                    for (int i = 0; i < arr.length(); i++) {
+                                        JSONObject o = arr.getJSONObject(i);
+                                        String songId = o.optString("rid", o.optString("id", ""));
+                                        if (songId.length() == 0) continue;
+
+                                        String title = o.optString("name", "未知歌曲");
+                                        String artist = o.optString("artist", "酷我歌手");
+                                        String pic = o.optString("pic", o.optString("web_albumpic_short", ""));
+                                        String cover = pic.length() > 0 ? formatCoverThumbnail(pic) : null;
+
+                                        songs.add(new MainActivity.DisplayEntry(
+                                                "kw_" + songId, title, artist, 
+                                                artist + " [" + qualityLabel + "]", 
+                                                cover, qualityLabel, true, bitRateNumeric));
+                                    }
                                 }
                             }
                         } catch (Throwable ignored) {}
