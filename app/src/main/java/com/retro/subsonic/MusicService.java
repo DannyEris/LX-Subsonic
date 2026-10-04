@@ -61,7 +61,8 @@ public class MusicService extends Service {
                     if (mediaPlayer.isPlaying()) {
                         int pos = mediaPlayer.getCurrentPosition();
                         int dur = mediaPlayer.getDuration();
-                        if (dur > 0 && dur < 7200000 && pos <= dur) {
+                        // 过滤未就绪或大于 2 小时的异常时长
+                        if (dur > 1000 && dur < 7200000 && pos <= dur + 1000) {
                             broadcastStatus(true, pos, dur);
                         }
                     }
@@ -136,7 +137,7 @@ public class MusicService extends Service {
                 mp.start();
                 AudioEffectsManager.getInstance().attachMediaPlayer(mp, MusicService.this);
                 int dur = mp.getDuration();
-                broadcastStatus(true, 0, (dur > 0 && dur < 7200000) ? dur : 0);
+                broadcastStatus(true, 0, (dur > 1000 && dur < 7200000) ? dur : 0);
             }
         });
 
@@ -155,8 +156,6 @@ public class MusicService extends Service {
                 return true;
             }
         });
-
-        // 彻底移除 mediaPlayer.setOnBufferingUpdateListener 对真实下载进度的干扰
     }
 
     @Override
@@ -201,6 +200,7 @@ public class MusicService extends Service {
         final SongItem item = playlist.get(index);
         isChangingSong = true;
 
+        // 立即暂停并取消后台预加载，全力保障当前歌曲的起播带宽
         preloadHandler.removeCallbacks(preloadRunnable);
         SongPreloadManager.getInstance().cancel();
 
@@ -213,7 +213,7 @@ public class MusicService extends Service {
             mediaPlayer.reset();
             applyMuteState();
 
-            // 1. 命中本地缓存文件或本地扫描文件：不显示缓冲数值，并在平稳起播后调度下一曲预加载
+            // 1. 命中本地缓存或本地文件：直接以 file:// 协议秒播，不显示缓冲条
             if (CacheManager.isSongCached(this, item.id) || (item.streamUrl != null && item.streamUrl.startsWith("file://"))) {
                 lastBufferPercent = -1;
                 broadcastStatus(false, 0, 0);
@@ -224,11 +224,12 @@ public class MusicService extends Service {
                 mediaPlayer.prepareAsync();
                 savePlaybackState();
 
+                // 当前歌曲已经在本地，起播 1.5 秒后安全启动下一首预加载
                 preloadHandler.postDelayed(preloadRunnable, 1500);
                 return;
             }
 
-            // 2. 需从网络拉取：显示缓冲进度，严格缓冲完成后再触发下一首静默缓冲
+            // 2. 属于在线流：显示缓冲进度，严格等待当前歌曲 100% 下载完毕后再去预缓冲下一首
             lastBufferPercent = 0;
             broadcastStatus(false, 0, 0);
 
@@ -247,10 +248,11 @@ public class MusicService extends Service {
                 @Override
                 public void onCached(File cachedFile) {
                     if (currentIndex < 0 || currentIndex >= playlist.size() || !item.id.equals(playlist.get(currentIndex).id)) return;
-                    // 当前歌曲 100% 写入完毕，立即隐藏缓冲数值
+                    // 当前歌曲 100% 下载完毕，隐藏当前歌曲缓冲文字
                     lastBufferPercent = -1;
                     broadcastCurrentState();
-                    // 仅当当前歌曲彻底缓冲完毕后，才启动下一首后台静默预缓冲
+
+                    // 当前歌曲彻底下完后，立即静默预缓冲下一首歌曲
                     triggerPreloadNextSong();
                 }
 
@@ -342,7 +344,7 @@ public class MusicService extends Service {
                 boolean playing = mediaPlayer.isPlaying();
                 int pos = mediaPlayer.getCurrentPosition();
                 int dur = mediaPlayer.getDuration();
-                broadcastStatus(playing, pos, (dur > 0 && dur < 7200000) ? dur : 0);
+                broadcastStatus(playing, pos, (dur > 1000 && dur < 7200000) ? dur : 0);
             } catch (Throwable ignored) {}
         }
     }
