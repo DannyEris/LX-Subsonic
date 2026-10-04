@@ -40,7 +40,6 @@ public class AudioVisualizerHelper {
             try {
                 visualizer = new Visualizer(targetSession);
             } catch (Throwable t1) {
-                // 若指定 sessionId 失败，自动容错回退到全局输出混音 Session 0
                 if (targetSession != 0) {
                     visualizer = new Visualizer(0);
                 } else {
@@ -52,7 +51,6 @@ public class AudioVisualizerHelper {
             int captureSize = Math.max(128, range[0]);
             visualizer.setCaptureSize(captureSize);
 
-            // 同时启用 WaveForm 波形与 FFT 采样，确保 x86 驱动不提供 FFT 时波形能接管
             visualizer.setDataCaptureListener(new Visualizer.OnDataCaptureListener() {
                 @Override
                 public void onWaveFormDataCapture(Visualizer visualizer, byte[] waveform, int samplingRate) {
@@ -87,12 +85,12 @@ public class AudioVisualizerHelper {
         lastDataTime = System.currentTimeMillis();
         long sum = 0;
         for (byte b : waveform) {
-            int val = (b & 0xFF) - 128; // PCM 8-bit 无符号转有符号偏移
+            int val = (b & 0xFF) - 128;
             sum += (val * val);
         }
         float rms = (float) Math.sqrt(sum / (double) waveform.length) / 128.0f;
-        // 放大低音与鼓点冲击力
-        float energy = Math.min(1.0f, rms * 2.8f);
+        // 采用平滑对数曲线映射，消除爆音冲击，起伏更自然精准
+        float energy = Math.min(1.0f, (float) Math.pow(rms * 1.8f, 0.85));
         if (listener != null) {
             listener.onSpectrumUpdate(new float[32], energy);
         }
@@ -103,13 +101,12 @@ public class AudioVisualizerHelper {
         lastDataTime = System.currentTimeMillis();
         if (fft.length < 8) return;
         float bassSum = 0;
-        // 抓取低频前 6 个频段（低音与鼓点能量）
         for (int i = 1; i < 7; i++) {
             byte rfk = fft[i * 2];
             byte ifk = fft[i * 2 + 1];
             bassSum += (float) Math.hypot(rfk, ifk);
         }
-        float bassEnergy = Math.min(1.0f, (bassSum / 6.0f) / 48.0f);
+        float bassEnergy = Math.min(1.0f, (bassSum / 6.0f) / 56.0f);
         if (listener != null && bassEnergy > 0.05f) {
             listener.onSpectrumUpdate(new float[32], bassEnergy);
         }
@@ -120,15 +117,13 @@ public class AudioVisualizerHelper {
         fallbackHandler.postDelayed(fallbackRunnable, 200);
     }
 
-    // 针对老平板硬件驱动无输出或投屏时的有机节拍模拟保底
     private Runnable fallbackRunnable = new Runnable() {
         @Override
         public void run() {
             if (!isPlaying) return;
             long now = System.currentTimeMillis();
             if (now - lastDataTime > 300) {
-                // 模拟呼吸起伏节奏
-                float fake = (float) (Math.sin(now / 180.0) * 0.25 + 0.35);
+                float fake = (float) (Math.sin(now / 220.0) * 0.20 + 0.28);
                 if (listener != null) {
                     listener.onSpectrumUpdate(new float[32], fake);
                 }
