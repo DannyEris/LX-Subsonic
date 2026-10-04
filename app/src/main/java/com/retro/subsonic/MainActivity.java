@@ -2947,7 +2947,7 @@ public class MainActivity extends Activity {
                 tv.setPadding(0, 10, 0, 10);
                 layoutLyricsContainer.addView(tv);
             }
-            if (!lines.length == 0 && tvVisualizerCurrentLyric != null) {
+            if (lines.length > 0 && tvVisualizerCurrentLyric != null) {
                 tvVisualizerCurrentLyric.setText(lines[0].trim());
             }
             return;
