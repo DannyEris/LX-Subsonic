@@ -1768,7 +1768,6 @@ public class MainActivity extends Activity {
     }
 
     // ==================== [第 1 部分在此截断，请回复“继续”获取第 2 部分] ====================
-    // ==================== [第 2 部分开始] ====================
     private void setupBitrateSpinners() {
         BitrateSpinnerAdapter adapterConfig = new BitrateSpinnerAdapter(BITRATE_LABELS);
         BitrateSpinnerAdapter adapterDetail = new BitrateSpinnerAdapter(BITRATE_LABELS);
