@@ -1909,7 +1909,7 @@ public class MainActivity extends Activity {
         spinnerPlazaPlatform.setAdapter(new SimpleDarkAdapter(LxApiHelper.PLAZA_PLATFORM_NAMES));
         spinnerPlazaPlatform.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
-            public void火OnItemSelected(AdapterView<?> parent, View view, int position, long id) {
+            public void OnItemSelected(AdapterView<?> parent, View view, int position, long id) {
                 if (isSpinnersInitializing) return;
                 currentPlazaTagId = "";
                 currentPlazaTagName = "";
