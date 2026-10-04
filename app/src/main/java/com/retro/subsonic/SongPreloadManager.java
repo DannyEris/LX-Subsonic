@@ -28,10 +28,11 @@ public class SongPreloadManager {
         if (context == null || songId == null || songId.length() == 0 || streamUrl == null || streamUrl.length() == 0) {
             return;
         }
-        // 本地音频文件或已缓存文件直接跳过
+        // 本地音频文件直接跳过
         if (songId.startsWith("local_file:") || streamUrl.startsWith("file://")) {
             return;
         }
+        // 若已存在且为有效文件，无需重复下载
         if (CacheManager.isSongCached(context, songId)) {
             return;
         }
@@ -54,9 +55,23 @@ public class SongPreloadManager {
                     URL url = new URL(streamUrl);
                     conn = (HttpURLConnection) url.openConnection();
                     conn.setInstanceFollowRedirects(true);
-                    conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; U; Android 4.2.2; zh-cn) AppleWebKit/534.30");
-                    conn.setConnectTimeout(15000);
-                    conn.setReadTimeout(15000);
+                    conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36");
+
+                    // 补全防盗链头，防止部分音乐平台直链返回 403 导致预下载失败
+                    if (streamUrl.contains("163.com") || streamUrl.contains("126.net")) {
+                        conn.setRequestProperty("Referer", "https://music.163.com/");
+                    } else if (streamUrl.contains("qq.com") || streamUrl.contains("gtimg.cn")) {
+                        conn.setRequestProperty("Referer", "https://y.qq.com/");
+                    } else if (streamUrl.contains("kugou.com")) {
+                        conn.setRequestProperty("Referer", "http://www.kugou.com/");
+                    } else if (streamUrl.contains("kuwo.cn")) {
+                        conn.setRequestProperty("Referer", "http://www.kuwo.cn/");
+                    } else if (streamUrl.contains("migu.cn")) {
+                        conn.setRequestProperty("Referer", "https://music.migu.cn/");
+                    }
+
+                    conn.setConnectTimeout(12000);
+                    conn.setReadTimeout(12000);
                     if (conn instanceof HttpsURLConnection) {
                         ((HttpsURLConnection) conn).setSSLSocketFactory(new TLSSocketFactory());
                     }
@@ -68,7 +83,6 @@ public class SongPreloadManager {
                         byte[] buf = new byte[16384];
                         int read;
                         while ((read = is.read(buf)) != -1) {
-                            // 如果歌曲发生改变或预缓冲被新曲打断
                             if (!songId.equals(currentPreloadingSongId)) {
                                 fos.close();
                                 tmpFile.delete();
@@ -80,7 +94,6 @@ public class SongPreloadManager {
                         fos.close();
                         fos = null;
 
-                        // 校验音频有效性并安全写入目标缓存
                         if (CacheManager.isValidAudioFile(tmpFile)) {
                             if (targetFile.exists()) {
                                 targetFile.delete();
