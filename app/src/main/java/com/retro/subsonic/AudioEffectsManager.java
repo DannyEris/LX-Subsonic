@@ -10,6 +10,10 @@ import android.media.audiofx.Virtualizer;
 
 import java.lang.ref.WeakReference;
 
+public synchronized int getAudioSessionId() {
+        return currentSessionId;
+    }
+
 public class AudioEffectsManager {
 
     private static AudioEffectsManager instance;
