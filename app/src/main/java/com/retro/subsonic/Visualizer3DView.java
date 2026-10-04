@@ -30,10 +30,11 @@ public class Visualizer3DView extends GLSurfaceView implements GLSurfaceView.Ren
     private final float[] mvpMatrix = new float[16];
 
     private float runningTime = 0f;
-    private float targetEnergy = 0f;
+    private volatile float targetEnergy = 0f;
     private float smoothEnergy = 0f;
+    private volatile boolean isPlaying = false;
 
-    // 顶点着色器：透视顶点计算与波纹高度偏移
+    // 顶点着色器：高度直接与能量挂钩，能量为 0 时呈现完全平整的水银镜面
     private final String vertexShaderCode =
             "uniform mat4 uMvpMatrix;\n" +
             "uniform float uTime;\n" +
@@ -44,14 +45,14 @@ public class Visualizer3DView extends GLSurfaceView implements GLSurfaceView.Ren
             "void main() {\n" +
             "    float r = length(aPosition.xy);\n" +
             "    vDist = r;\n" +
-            "    // 中心向外扩散的同心正弦衰减涟漪\n" +
-            "    float wave1 = sin(r * 12.0 - uTime * 3.5) * (1.0 - smoothstep(0.0, 1.0, r));\n" +
-            "    float wave2 = cos(r * 22.0 - uTime * 5.0) * 0.4 * (1.0 - r);\n" +
-            "    float height = (wave1 + wave2) * (0.08 + uEnergy * 0.28);\n" +
+            "    // 中心向外扩散的高低起伏涟漪\n" +
+            "    float wave1 = sin(r * 14.0 - uTime * 4.0) * (1.0 - smoothstep(0.0, 1.0, r));\n" +
+            "    float wave2 = cos(r * 26.0 - uTime * 6.0) * 0.5 * (1.0 - r);\n" +
+            "    // 移除无条件的 0.08 常量振幅，高度直接由能量驱动\n" +
+            "    float height = (wave1 + wave2) * (uEnergy * 0.42);\n" +
             "    vHeight = height;\n" +
             "    vec3 pos = vec3(aPosition.x, aPosition.y, height);\n" +
             "    gl_Position = uMvpMatrix * vec4(pos, 1.0);\n" +
-            "    gl_PointSize = 2.0;\n" +
             "}\n";
 
     // 片元着色器：纯黑灰渐变、高光水银反光质感
@@ -60,10 +61,9 @@ public class Visualizer3DView extends GLSurfaceView implements GLSurfaceView.Ren
             "varying float vHeight;\n" +
             "varying float vDist;\n" +
             "void main() {\n" +
-            "    // 基于高度的高冷水银金属光晕\n" +
-            "    float brightness = clamp(vHeight * 4.0 + 0.35, 0.05, 1.0);\n" +
+            "    // 凸起波峰呈亮白高光，波谷暗灰\n" +
+            "    float brightness = clamp(vHeight * 6.0 + 0.32, 0.05, 1.0);\n" +
             "    vec3 mercury = vec3(0.92, 0.94, 0.98) * brightness;\n" +
-            "    // 边缘暗黑羽化过渡至纯黑\n" +
             "    float alpha = clamp((1.0 - vDist) * 1.5, 0.0, 1.0);\n" +
             "    gl_FragColor = vec4(mercury * alpha, alpha * 0.85);\n" +
             "}\n";
@@ -108,6 +108,13 @@ public class Visualizer3DView extends GLSurfaceView implements GLSurfaceView.Ren
         this.targetEnergy = energy;
     }
 
+    public void setPlaying(boolean playing) {
+        this.isPlaying = playing;
+        if (!playing) {
+            this.targetEnergy = 0f;
+        }
+    }
+
     @Override
     public void onSurfaceCreated(GL10 gl, EGLConfig config) {
         GLES20.glClearColor(0.039f, 0.043f, 0.055f, 1.0f); // 极深黑背景 #0a0b0e
@@ -132,7 +139,7 @@ public class Visualizer3DView extends GLSurfaceView implements GLSurfaceView.Ren
         GLES20.glViewport(0, 0, width, height);
         float ratio = (float) width / (float) height;
         Matrix.frustumM(projectionMatrix, 0, -ratio * 0.5f, ratio * 0.5f, -0.5f, 0.5f, 1.0f, 10.0f);
-        // 观察相机：倾斜 38 度仰俯角，呈现截图中的 3D 纵深水银盘
+        // 观察相机倾斜仰俯角
         Matrix.setLookAtM(viewMatrix, 0, 0f, -1.35f, 1.15f, 0f, 0.08f, 0f, 0f, 1f, 0f);
     }
 
@@ -140,8 +147,17 @@ public class Visualizer3DView extends GLSurfaceView implements GLSurfaceView.Ren
     public void onDrawFrame(GL10 gl) {
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT | GLES20.GL_DEPTH_BUFFER_BIT);
 
-        runningTime += 0.02f;
-        smoothEnergy = smoothEnergy * 0.85f + targetEnergy * 0.15f;
+        if (isPlaying) {
+            // 播放中：时间推进速度随鼓点能量动态加快
+            runningTime += 0.02f + smoothEnergy * 0.035f;
+            smoothEnergy = smoothEnergy * 0.70f + targetEnergy * 0.30f;
+        } else {
+            // 暂停中：时间完全冻结，水银能量平滑衰减归零，回归宁静平坦的镜面
+            smoothEnergy = smoothEnergy * 0.85f;
+            if (smoothEnergy < 0.001f) {
+                smoothEnergy = 0f;
+            }
+        }
 
         GLES20.glUseProgram(programId);
 
@@ -156,7 +172,6 @@ public class Visualizer3DView extends GLSurfaceView implements GLSurfaceView.Ren
         GLES20.glEnableVertexAttribArray(aPosLoc);
         GLES20.glVertexAttribPointer(aPosLoc, 3, GLES20.GL_FLOAT, false, 0, vertexBuffer);
 
-        // 渲染极坐标点阵与线框构成的水银流动波纹
         for (int r = 0; r <= RINGS; r++) {
             GLES20.glDrawArrays(GLES20.GL_LINE_LOOP, r * SECTORS, SECTORS);
         }
