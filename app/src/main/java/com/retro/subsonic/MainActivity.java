@@ -215,28 +215,6 @@ public class MainActivity extends Activity {
     private static LruCache<String, Bitmap> imageMemoryCache;
     private static final ExecutorService imageLoadExecutor = Executors.newFixedThreadPool(3);
 
-    // 下一首歌曲后台预加载管理调度器
-    private Handler preloadHandler = new Handler();
-    private Runnable preloadRunnable = new Runnable() {
-        @Override
-        public void run() {
-            triggerPreloadNextSong();
-        }
-    };
-
-    private void triggerPreloadNextSong() {
-        if (DlnaManager.isCasting()) return;
-        ArrayList<MusicService.SongItem> queue = MusicService.getPlaylist();
-        int curIdx = MusicService.getCurrentIndex();
-        if (queue != null && !queue.isEmpty() && curIdx >= 0) {
-            int nextIdx = (curIdx + 1) % queue.size();
-            MusicService.SongItem nextSong = queue.get(nextIdx);
-            if (nextSong != null && nextSong.streamUrl != null) {
-                SongPreloadManager.getInstance().preload(MainActivity.this, nextSong.id, nextSong.streamUrl);
-            }
-        }
-    }
-
     private Handler dlnaSyncHandler = new Handler();
     private Runnable dlnaSyncRunnable = new Runnable() {
         @Override
@@ -247,7 +225,6 @@ public class MainActivity extends Activity {
                         @Override
                         public void onPositionReceived(int positionMs, int durationMs) {
                             if (positionMs >= 0 && !isUserSeeking) {
-                                // 过滤异常极端数值
                                 if (durationMs > 7200000 || (durationMs > 0 && positionMs > durationMs)) return;
                                 int totalDur = durationMs > 0 ? durationMs : (seekBar != null ? seekBar.getMax() : 0);
                                 if (totalDur > 5000 && positionMs >= totalDur - 1000 && lastValidProgressMs < totalDur * 0.70) return;
@@ -341,9 +318,7 @@ public class MainActivity extends Activity {
                 int duration = intent.getIntExtra("duration", 0);
                 int bufferPercent = intent.getIntExtra("bufferPercent", -1);
 
-                // 核心防抖拦截：过滤大于 2 小时 (7200000ms) 的极端流媒体脏数据，彻底消除 18144s 引起的进度条剧烈抽搐
-                boolean isDurationValid = (duration > 0 && duration < 7200000);
-
+                // 核心修复 1：严格控制缓冲显示，仅在 0~99% 且当前歌曲未缓存完成时显示，完成或为负时彻底隐藏
                 if (bufferPercent >= 0 && bufferPercent < 100) {
                     String bufStr = "缓冲 " + bufferPercent + "%";
                     if (tvBottomBuffer != null) {
@@ -372,6 +347,11 @@ public class MainActivity extends Activity {
                         lastValidProgressMs = 0;
                         if (!DlnaManager.isCasting()) manualLyricOffsetMs = 0;
                         updateLyricOffsetStatusView();
+
+                        // 切歌瞬间复位界面与缓冲状态，防止旧数值闪烁残留
+                        if (tvBottomBuffer != null) tvBottomBuffer.setVisibility(View.GONE);
+                        if (tvDetailBuffer != null) tvDetailBuffer.setVisibility(View.GONE);
+
                         seekBar.setProgress(0);
                         detailSeekBar.setProgress(0);
                         if (capsuleSeekBar != null) capsuleSeekBar.setProgress(0);
@@ -385,10 +365,6 @@ public class MainActivity extends Activity {
                         refreshQueueList();
                         updateCacheSizeDisplay();
 
-                        // 切歌平稳后延迟 2.5 秒触发静默预加载
-                        preloadHandler.removeCallbacks(preloadRunnable);
-                        preloadHandler.postDelayed(preloadRunnable, 2500);
-
                         if (DlnaManager.isCasting()) {
                             dlnaSyncHandler.removeCallbacks(dlnaSyncRunnable);
                             dlnaSyncHandler.postDelayed(dlnaSyncRunnable, 500);
@@ -400,25 +376,27 @@ public class MainActivity extends Activity {
                     updateFavButtonState(songId);
                 }
 
-                if (!DlnaManager.isCasting() && !isUserSeeking && isDurationValid) {
-                    // 防止播放位置超出歌曲总时长导致的拉扯
+                // 核心修复 2：严格防抖门限，播放中且有效时长大于1秒小于2小时才更新进度，阻断流媒体握手初期的 18144s 脏数据拉扯
+                boolean isDurationValid = (duration > 1000 && duration < 7200000);
+                if (!DlnaManager.isCasting() && !isUserSeeking && isPlaying && isDurationValid) {
                     if (position > duration) position = duration;
-                    lastValidProgressMs = position;
-
-                    seekBar.setMax(duration);
-                    seekBar.setProgress(position);
-                    detailSeekBar.setMax(duration);
-                    detailSeekBar.setProgress(position);
-                    if (capsuleSeekBar != null) {
-                        capsuleSeekBar.setMax(duration);
-                        capsuleSeekBar.setProgress(position);
+                    if (position >= 0) {
+                        lastValidProgressMs = position;
+                        seekBar.setMax(duration);
+                        seekBar.setProgress(position);
+                        detailSeekBar.setMax(duration);
+                        detailSeekBar.setProgress(position);
+                        if (capsuleSeekBar != null) {
+                            capsuleSeekBar.setMax(duration);
+                            capsuleSeekBar.setProgress(position);
+                        }
+                        String timeStr = formatTime(position) + " / " + formatTime(duration);
+                        tvTime.setText(timeStr);
+                        tvDetailTime.setText(timeStr);
+                        if (tvCapsuleCurrentTime != null) tvCapsuleCurrentTime.setText(formatTime(position));
+                        if (tvCapsuleTotalTime != null) tvCapsuleTotalTime.setText(formatTime(duration));
+                        updateLyricPosition(position);
                     }
-                    String timeStr = formatTime(position) + " / " + formatTime(duration);
-                    tvTime.setText(timeStr);
-                    tvDetailTime.setText(timeStr);
-                    if (tvCapsuleCurrentTime != null) tvCapsuleCurrentTime.setText(formatTime(position));
-                    if (tvCapsuleTotalTime != null) tvCapsuleTotalTime.setText(formatTime(duration));
-                    updateLyricPosition(position);
                 }
             }
         }
