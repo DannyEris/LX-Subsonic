@@ -41,8 +41,16 @@ public class MusicService extends Service {
     private MediaPlayer mediaPlayer;
     private LocalStreamProxy currentProxy;
     private boolean isMuted = false;
-    private volatile boolean isChangingSong = false; // 换歌中防抖锁，防止脏数据发出
-    private int lastBufferPercent = -1;
+    private volatile boolean isChangingSong = false;
+    private volatile int lastBufferPercent = -1;
+
+    private Handler preloadHandler = new Handler();
+    private Runnable preloadRunnable = new Runnable() {
+        @Override
+        public void run() {
+            triggerPreloadNextSong();
+        }
+    };
 
     private Handler progressHandler = new Handler();
     private Runnable progressRunnable = new Runnable() {
@@ -53,8 +61,7 @@ public class MusicService extends Service {
                     if (mediaPlayer.isPlaying()) {
                         int pos = mediaPlayer.getCurrentPosition();
                         int dur = mediaPlayer.getDuration();
-                        // 过滤未就绪时的无效或极大异常时长（大于 2 小时）
-                        if (dur > 0 && dur < 7200000) {
+                        if (dur > 0 && dur < 7200000 && pos <= dur) {
                             broadcastStatus(true, pos, dur);
                         }
                     }
@@ -125,7 +132,6 @@ public class MusicService extends Service {
             @Override
             public void onPrepared(MediaPlayer mp) {
                 isChangingSong = false;
-                lastBufferPercent = 100;
                 applyMuteState();
                 mp.start();
                 AudioEffectsManager.getInstance().attachMediaPlayer(mp, MusicService.this);
@@ -145,16 +151,12 @@ public class MusicService extends Service {
             @Override
             public boolean onError(MediaPlayer mp, int what, int extra) {
                 isChangingSong = false;
+                lastBufferPercent = -1;
                 return true;
             }
         });
 
-        mediaPlayer.setOnBufferingUpdateListener(new MediaPlayer.OnBufferingUpdateListener() {
-            @Override
-            public void onBufferingUpdate(MediaPlayer mp, int percent) {
-                lastBufferPercent = percent;
-            }
-        });
+        // 彻底移除 mediaPlayer.setOnBufferingUpdateListener 对真实下载进度的干扰
     }
 
     @Override
@@ -196,12 +198,11 @@ public class MusicService extends Service {
     private void playSong(int index) {
         if (index < 0 || index >= playlist.size()) return;
         currentIndex = index;
-        SongItem item = playlist.get(index);
+        final SongItem item = playlist.get(index);
         isChangingSong = true;
-        lastBufferPercent = -1;
 
-        // 立即发送复位广播，清空旧曲目的状态与进度
-        broadcastStatus(false, 0, 0);
+        preloadHandler.removeCallbacks(preloadRunnable);
+        SongPreloadManager.getInstance().cancel();
 
         if (currentProxy != null) {
             currentProxy.stop();
@@ -212,35 +213,52 @@ public class MusicService extends Service {
             mediaPlayer.reset();
             applyMuteState();
 
-            // 核心修复点：优先检查是否命中本地预缓存，命中则直接以 file:// 协议秒播
-            if (CacheManager.isSongCached(this, item.id)) {
-                File localCachedFile = CacheManager.getSongFile(this, item.id);
-                mediaPlayer.setDataSource(this, Uri.fromFile(localCachedFile));
+            // 1. 命中本地缓存文件或本地扫描文件：不显示缓冲数值，并在平稳起播后调度下一曲预加载
+            if (CacheManager.isSongCached(this, item.id) || (item.streamUrl != null && item.streamUrl.startsWith("file://"))) {
+                lastBufferPercent = -1;
+                broadcastStatus(false, 0, 0);
+
+                File localFile = CacheManager.isSongCached(this, item.id) ?
+                        CacheManager.getSongFile(this, item.id) : new File(item.streamUrl.substring(7));
+                mediaPlayer.setDataSource(this, Uri.fromFile(localFile));
                 mediaPlayer.prepareAsync();
                 savePlaybackState();
+
+                preloadHandler.postDelayed(preloadRunnable, 1500);
                 return;
             }
 
-            // 本地扫描的音乐文件直接播放
-            if (item.streamUrl != null && item.streamUrl.startsWith("file://")) {
-                mediaPlayer.setDataSource(this, Uri.parse(item.streamUrl));
-                mediaPlayer.prepareAsync();
-                savePlaybackState();
-                return;
-            }
+            // 2. 需从网络拉取：显示缓冲进度，严格缓冲完成后再触发下一首静默缓冲
+            lastBufferPercent = 0;
+            broadcastStatus(false, 0, 0);
 
-            // 尚未缓存的远程音频走本地流代理缓冲
             currentProxy = new LocalStreamProxy(this, item.id, item.streamUrl, new LocalStreamProxy.ProxyListener() {
                 @Override
                 public void onProgress(int percent) {
-                    lastBufferPercent = percent;
+                    if (currentIndex < 0 || currentIndex >= playlist.size() || !item.id.equals(playlist.get(currentIndex).id)) return;
+                    if (percent >= 100) {
+                        lastBufferPercent = -1;
+                    } else {
+                        lastBufferPercent = percent;
+                    }
+                    broadcastCurrentState();
                 }
 
                 @Override
-                public void onCached(File cachedFile) {}
+                public void onCached(File cachedFile) {
+                    if (currentIndex < 0 || currentIndex >= playlist.size() || !item.id.equals(playlist.get(currentIndex).id)) return;
+                    // 当前歌曲 100% 写入完毕，立即隐藏缓冲数值
+                    lastBufferPercent = -1;
+                    broadcastCurrentState();
+                    // 仅当当前歌曲彻底缓冲完毕后，才启动下一首后台静默预缓冲
+                    triggerPreloadNextSong();
+                }
 
                 @Override
-                public void onError(String reason) {}
+                public void onError(String reason) {
+                    lastBufferPercent = -1;
+                    broadcastCurrentState();
+                }
             });
 
             String proxyUrl = currentProxy.start();
@@ -250,6 +268,16 @@ public class MusicService extends Service {
 
         } catch (Throwable t) {
             isChangingSong = false;
+            lastBufferPercent = -1;
+        }
+    }
+
+    private void triggerPreloadNextSong() {
+        if (playlist.isEmpty() || currentIndex < 0) return;
+        int nextIdx = (currentIndex + 1) % playlist.size();
+        SongItem nextSong = playlist.get(nextIdx);
+        if (nextSong != null && nextSong.streamUrl != null && !nextSong.streamUrl.isEmpty()) {
+            SongPreloadManager.getInstance().preload(this, nextSong.id, nextSong.streamUrl);
         }
     }
 
@@ -371,6 +399,8 @@ public class MusicService extends Service {
     public void onDestroy() {
         super.onDestroy();
         progressHandler.removeCallbacksAndMessages(null);
+        preloadHandler.removeCallbacksAndMessages(null);
+        SongPreloadManager.getInstance().cancel();
         if (currentProxy != null) {
             currentProxy.stop();
         }
