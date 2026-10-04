@@ -215,6 +215,15 @@ public class MainActivity extends Activity {
     private static LruCache<String, Bitmap> imageMemoryCache;
     private static final ExecutorService imageLoadExecutor = Executors.newFixedThreadPool(3);
 
+    // 下一首歌曲后台预加载管理调度器
+    private Handler preloadHandler = new Handler();
+    private Runnable preloadRunnable = new Runnable() {
+        @Override
+        public void run() {
+            triggerPreloadNextSong();
+        }
+    };
+
     private Handler dlnaSyncHandler = new Handler();
     private Runnable dlnaSyncRunnable = new Runnable() {
         @Override
@@ -358,6 +367,10 @@ public class MainActivity extends Activity {
                         loadLyrics(songId, artist, title);
                         refreshQueueList();
                         updateCacheSizeDisplay();
+
+                        // 歌曲切换后3秒无缝触发下一曲后台预缓冲
+                        preloadHandler.removeCallbacks(preloadRunnable);
+                        preloadHandler.postDelayed(preloadRunnable, 3000);
 
                         if (DlnaManager.isCasting()) {
                             dlnaSyncHandler.removeCallbacks(dlnaSyncRunnable);
@@ -1755,6 +1768,7 @@ public class MainActivity extends Activity {
     }
 
     // ==================== [第 1 部分在此截断，请回复“继续”获取第 2 部分] ====================
+    // ==================== [第 2 部分开始] ====================
     private void setupBitrateSpinners() {
         BitrateSpinnerAdapter adapterConfig = new BitrateSpinnerAdapter(BITRATE_LABELS);
         BitrateSpinnerAdapter adapterDetail = new BitrateSpinnerAdapter(BITRATE_LABELS);
@@ -2247,12 +2261,22 @@ public class MainActivity extends Activity {
             });
         }
 
-        // 核心修复：3D 特效页专属悬浮播放列表抽屉弹出与点击
+        // 修复：3D 列表按钮事件及其面板联动
         if (btnCapsuleQueue != null) {
             btnCapsuleQueue.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    toggleVisualizerQueuePanel();
+                    if (layoutVisualizerQueuePanel != null) {
+                        if (layoutVisualizerQueuePanel.getVisibility() == View.VISIBLE) {
+                            layoutVisualizerQueuePanel.setVisibility(View.GONE);
+                        } else {
+                            refreshQueueList();
+                            if (visualizerQueueAdapter != null) visualizerQueueAdapter.notifyDataSetChanged();
+                            layoutVisualizerQueuePanel.setVisibility(View.VISIBLE);
+                            int curIdx = MusicService.getCurrentIndex();
+                            if (curIdx >= 0) lvVisualizerQueue.setSelection(curIdx);
+                        }
+                    }
                 }
             });
         }
@@ -2277,7 +2301,7 @@ public class MainActivity extends Activity {
                         intent.putExtra("target_index", position);
                         startService(intent);
                         refreshQueueList();
-                        scrollToCurrentPlayingInQueue();
+                        if (visualizerQueueAdapter != null) visualizerQueueAdapter.notifyDataSetChanged();
                     }
                 }
             });
@@ -2308,17 +2332,6 @@ public class MainActivity extends Activity {
         setupPlaybackControls();
     }
 
-    private void toggleVisualizerQueuePanel() {
-        if (layoutVisualizerQueuePanel == null) return;
-        if (layoutVisualizerQueuePanel.getVisibility() == View.VISIBLE) {
-            layoutVisualizerQueuePanel.setVisibility(View.GONE);
-        } else {
-            refreshQueueList();
-            layoutVisualizerQueuePanel.setVisibility(View.VISIBLE);
-            scrollToCurrentPlayingInQueue();
-        }
-    }
-
     private void openVisualizerOverlay() {
         if (layoutVisualizerOverlay == null) return;
         layoutVisualizerOverlay.setVisibility(View.VISIBLE);
@@ -2327,13 +2340,11 @@ public class MainActivity extends Activity {
             viewVisualizer3D.setPlaying(isCurrentSongPlaying);
         }
 
-        // 挂载 AudioSession 并同步当前播放状态
+        // 挂载 AudioSession，启动采集器时去除 > 0 的限制，允许使用全局混音
         int sessionId = AudioEffectsManager.getInstance().getAudioSessionId();
         if (audioVisualizerHelper != null) {
             audioVisualizerHelper.setPlaying(isCurrentSongPlaying);
-            if (sessionId > 0) {
-                audioVisualizerHelper.start(sessionId);
-            }
+            audioVisualizerHelper.start(sessionId); // 无论 sessionId 是具体值还是 0，均可正常启动
         }
 
         // 同步右上角半透艺术剪影
@@ -2359,21 +2370,17 @@ public class MainActivity extends Activity {
         }
         updateModeIcons(MusicService.getCurrentMode());
         updatePlayPauseIcons(isCurrentSongPlaying);
-
-        if (layoutVisualizerQueuePanel != null) {
-            layoutVisualizerQueuePanel.setVisibility(View.GONE);
-        }
     }
 
     private void closeVisualizerOverlay() {
         if (layoutVisualizerOverlay == null) return;
+        if (layoutVisualizerQueuePanel != null) {
+            layoutVisualizerQueuePanel.setVisibility(View.GONE);
+        }
         layoutVisualizerOverlay.setVisibility(View.GONE);
         if (viewVisualizer3D != null) viewVisualizer3D.onPause();
         if (audioVisualizerHelper != null) {
             audioVisualizerHelper.stop();
-        }
-        if (layoutVisualizerQueuePanel != null) {
-            layoutVisualizerQueuePanel.setVisibility(View.GONE);
         }
     }
 
@@ -2438,7 +2445,6 @@ public class MainActivity extends Activity {
             });
         }
 
-        // 核心修复：投播断开后手动时延与全局时延全部清零复位
         if (btnDetailDlna != null) {
             btnDetailDlna.setOnClickListener(new View.OnClickListener() {
                 @Override
@@ -2454,15 +2460,18 @@ public class MainActivity extends Activity {
                                         dlnaSyncHandler.removeCallbacks(dlnaSyncRunnable);
                                         btnDetailDlna.setText("DLNA");
                                         btnDetailDlna.setTextColor(0xFF00E5FF);
-                                        manualLyricOffsetMs = 0; // 彻底复位手动补偿
-                                        dlnaGlobalLyricOffsetMs = 0; // 彻底复位全局投屏时延
+
+                                        // 修复：同时强制清零投播时延与用户在投播期间调整的手动补偿
+                                        dlnaGlobalLyricOffsetMs = 0;
+                                        manualLyricOffsetMs = 0; 
                                         updateLyricOffsetStatusView();
                                         rebuildActiveLyricsView();
+
                                         Intent muteIntent = new Intent(MainActivity.this, MusicService.class);
                                         muteIntent.setAction(MusicService.ACTION_SET_MUTE);
                                         muteIntent.putExtra("is_muted", false);
                                         startService(muteIntent);
-                                        Toast.makeText(MainActivity.this, "已断开 DLNA 投屏并复位歌词时延", Toast.LENGTH_SHORT).show();
+                                        Toast.makeText(MainActivity.this, "已断开 DLNA 投屏", Toast.LENGTH_SHORT).show();
                                     }
                                 })
                                 .setNegativeButton("取消", null)
@@ -3224,6 +3233,7 @@ public class MainActivity extends Activity {
         currentCircularCoverBitmap = getRoundBitmap(raw);
         ivVinylCircularCover.setImageBitmap(currentCircularCoverBitmap);
 
+        // 同步 3D 特效全屏页中的剪影与胶囊图标
         if (ivVisualizerSilhouette != null) {
             ivVisualizerSilhouette.setImageBitmap(raw);
         }
@@ -3311,6 +3321,7 @@ public class MainActivity extends Activity {
         btnExitApp.setImageResource(android.R.drawable.ic_lock_power_off);
         btnDetailExitApp.setImageResource(android.R.drawable.ic_lock_power_off);
 
+        // 胶囊栏控制按钮初始图标
         if (btnCapsulePrev != null) btnCapsulePrev.setImageResource(android.R.drawable.ic_media_previous);
         if (btnCapsuleNext != null) btnCapsuleNext.setImageResource(android.R.drawable.ic_media_next);
         if (btnCapsuleQueue != null) btnCapsuleQueue.setImageResource(android.R.drawable.ic_menu_sort_by_size);
@@ -3531,16 +3542,6 @@ public class MainActivity extends Activity {
                             }
                             refreshQueueList();
                             Toast.makeText(MainActivity.this, "已设为下一首播放", Toast.LENGTH_SHORT).show();
-                        } else if (which == 1) {
-                            featuredSongs.add(song);
-                            saveLocalPlaylists();
-                            Toast.makeText(MainActivity.this, "已加入精选珍藏集", Toast.LENGTH_SHORT).show();
-                        } else if (which == 2) {
-                            carSongs.add(song);
-                            saveLocalPlaylists();
-                            Toast.makeText(MainActivity.this, "已加入车载驾驶歌单", Toast.LENGTH_SHORT).show();
-                        } else if (which == 3) {
-                            downloadSongItem(song);
                         }
                     }
                 })
@@ -3849,7 +3850,7 @@ public class MainActivity extends Activity {
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if (keyCode == KeyEvent.KEYCODE_BACK) {
-            // 优先关闭 3D 专属播放列表抽屉
+            // 优先收起 3D 抽屉面板
             if (layoutVisualizerQueuePanel != null && layoutVisualizerQueuePanel.getVisibility() == View.VISIBLE) {
                 layoutVisualizerQueuePanel.setVisibility(View.GONE);
                 return true;
@@ -3895,7 +3896,7 @@ public class MainActivity extends Activity {
             int sessionId = AudioEffectsManager.getInstance().getAudioSessionId();
             if (audioVisualizerHelper != null) {
                 audioVisualizerHelper.setPlaying(isCurrentSongPlaying);
-                if (sessionId > 0) audioVisualizerHelper.start(sessionId);
+                audioVisualizerHelper.start(sessionId);
             }
         }
     }
