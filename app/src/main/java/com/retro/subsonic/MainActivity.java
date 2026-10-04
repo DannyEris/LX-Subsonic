@@ -17,6 +17,7 @@ import android.graphics.Paint;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffXfermode;
 import android.graphics.Rect;
+import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
 import android.media.MediaMetadataRetriever;
@@ -3433,21 +3434,27 @@ public class MainActivity extends Activity {
                     @Override
                     public void onClick(DialogInterface dialog, int which) {
                         if (which == 0) {
-                            String playUrl = buildStreamUrl(song.id, getSavedBitrate());
+                            String playUrl;
+                            if (song.localPath != null && song.localPath.length() > 0) {
+                                playUrl = "file://" + song.localPath;
+                            } else if (song.id != null && song.id.startsWith("local_file:")) {
+                                playUrl = "file://" + song.id.substring(11);
+                            } else {
+                                playUrl = buildStreamUrl(song.id, getSavedBitrate());
+                            }
                             MusicService.SongItem item = new MusicService.SongItem(song.id, song.title, song.artist, playUrl, song.coverArt, song.quality);
-                            MusicService.insertNextToPlay(item);
+                            ArrayList<MusicService.SongItem> q = MusicService.getPlaylist();
+                            if (q.isEmpty()) {
+                                ArrayList<MusicService.SongItem> singleList = new ArrayList<MusicService.SongItem>();
+                                singleList.add(item);
+                                MusicService.setQueue(singleList, 0, MainActivity.this);
+                            } else {
+                                int curIdx = MusicService.getCurrentIndex();
+                                int insertIdx = (curIdx >= 0 && curIdx < q.size()) ? (curIdx + 1) : q.size();
+                                q.add(insertIdx, item);
+                            }
                             refreshQueueList();
                             Toast.makeText(MainActivity.this, "已设为下一首播放", Toast.LENGTH_SHORT).show();
-                        } else if (which == 1) {
-                            featuredSongs.add(song);
-                            saveLocalPlaylists();
-                            Toast.makeText(MainActivity.this, "已加入精选珍藏集", Toast.LENGTH_SHORT).show();
-                        } else if (which == 2) {
-                            carSongs.add(song);
-                            saveLocalPlaylists();
-                            Toast.makeText(MainActivity.this, "已加入车载驾驶歌单", Toast.LENGTH_SHORT).show();
-                        } else if (which == 3) {
-                            downloadSongItem(song);
                         }
                     }
                 })
@@ -3511,7 +3518,12 @@ public class MainActivity extends Activity {
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
-                            MusicService.appendQueue(appendQueue);
+                            ArrayList<MusicService.SongItem> currentQueue = MusicService.getPlaylist();
+                            if (currentQueue.isEmpty()) {
+                                MusicService.setQueue(appendQueue, 0, MainActivity.this);
+                            } else {
+                                currentQueue.addAll(appendQueue);
+                            }
                             refreshQueueList();
                             Toast.makeText(MainActivity.this, "已追加 " + appendQueue.size() + " 首歌曲", Toast.LENGTH_SHORT).show();
                         }
