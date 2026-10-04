@@ -8,11 +8,13 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import javax.net.ssl.HttpsURLConnection;
 
 public class SongPreloadManager {
     private static SongPreloadManager instance;
     private final ExecutorService preloadExecutor = Executors.newSingleThreadExecutor();
+    private volatile Future<?> activeTask = null;
     private volatile String currentPreloadingSongId = "";
 
     public static synchronized SongPreloadManager getInstance() {
@@ -28,11 +30,9 @@ public class SongPreloadManager {
         if (context == null || songId == null || songId.length() == 0 || streamUrl == null || streamUrl.length() == 0) {
             return;
         }
-        // 本地音频文件直接跳过
         if (songId.startsWith("local_file:") || streamUrl.startsWith("file://")) {
             return;
         }
-        // 若已存在且为有效文件，无需重复下载
         if (CacheManager.isSongCached(context, songId)) {
             return;
         }
@@ -40,8 +40,10 @@ public class SongPreloadManager {
             return;
         }
 
+        cancel();
         currentPreloadingSongId = songId;
-        preloadExecutor.execute(new Runnable() {
+
+        activeTask = preloadExecutor.submit(new Runnable() {
             @Override
             public void run() {
                 TLSSocketFactory.install();
@@ -57,7 +59,6 @@ public class SongPreloadManager {
                     conn.setInstanceFollowRedirects(true);
                     conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36");
 
-                    // 补全防盗链头，防止部分音乐平台直链返回 403 导致预下载失败
                     if (streamUrl.contains("163.com") || streamUrl.contains("126.net")) {
                         conn.setRequestProperty("Referer", "https://music.163.com/");
                     } else if (streamUrl.contains("qq.com") || streamUrl.contains("gtimg.cn")) {
@@ -83,7 +84,7 @@ public class SongPreloadManager {
                         byte[] buf = new byte[16384];
                         int read;
                         while ((read = is.read(buf)) != -1) {
-                            if (!songId.equals(currentPreloadingSongId)) {
+                            if (!songId.equals(currentPreloadingSongId) || Thread.currentThread().isInterrupted()) {
                                 fos.close();
                                 tmpFile.delete();
                                 return;
@@ -121,5 +122,9 @@ public class SongPreloadManager {
 
     public synchronized void cancel() {
         currentPreloadingSongId = "";
+        if (activeTask != null) {
+            activeTask.cancel(true);
+            activeTask = null;
+        }
     }
 }
