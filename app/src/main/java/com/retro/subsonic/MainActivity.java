@@ -224,7 +224,6 @@ public class MainActivity extends Activity {
         }
     };
 
-    // 直接在第一部分定义预加载实现，确保符号在编译期一定可见
     private void triggerPreloadNextSong() {
         if (DlnaManager.isCasting()) return;
         ArrayList<MusicService.SongItem> queue = MusicService.getPlaylist();
@@ -248,6 +247,8 @@ public class MainActivity extends Activity {
                         @Override
                         public void onPositionReceived(int positionMs, int durationMs) {
                             if (positionMs >= 0 && !isUserSeeking) {
+                                // 过滤异常极端数值
+                                if (durationMs > 7200000 || (durationMs > 0 && positionMs > durationMs)) return;
                                 int totalDur = durationMs > 0 ? durationMs : (seekBar != null ? seekBar.getMax() : 0);
                                 if (totalDur > 5000 && positionMs >= totalDur - 1000 && lastValidProgressMs < totalDur * 0.70) return;
                                 lastValidProgressMs = positionMs;
@@ -321,7 +322,6 @@ public class MainActivity extends Activity {
                 updatePlayPauseIcons(isPlaying);
                 updateVinylAnimationState();
 
-                // 核心同步：控制 3D 水银盘起伏与静止
                 if (viewVisualizer3D != null) {
                     viewVisualizer3D.setPlaying(isPlaying);
                 }
@@ -340,6 +340,9 @@ public class MainActivity extends Activity {
                 int position = intent.getIntExtra("position", 0);
                 int duration = intent.getIntExtra("duration", 0);
                 int bufferPercent = intent.getIntExtra("bufferPercent", -1);
+
+                // 核心防抖拦截：过滤大于 2 小时 (7200000ms) 的极端流媒体脏数据，彻底消除 18144s 引起的进度条剧烈抽搐
+                boolean isDurationValid = (duration > 0 && duration < 7200000);
 
                 if (bufferPercent >= 0 && bufferPercent < 100) {
                     String bufStr = "缓冲 " + bufferPercent + "%";
@@ -382,9 +385,9 @@ public class MainActivity extends Activity {
                         refreshQueueList();
                         updateCacheSizeDisplay();
 
-                        // 歌曲切换后3秒触发下一曲后台预缓冲
+                        // 切歌平稳后延迟 2.5 秒触发静默预加载
                         preloadHandler.removeCallbacks(preloadRunnable);
-                        preloadHandler.postDelayed(preloadRunnable, 3000);
+                        preloadHandler.postDelayed(preloadRunnable, 2500);
 
                         if (DlnaManager.isCasting()) {
                             dlnaSyncHandler.removeCallbacks(dlnaSyncRunnable);
@@ -397,8 +400,11 @@ public class MainActivity extends Activity {
                     updateFavButtonState(songId);
                 }
 
-                if (!DlnaManager.isCasting() && !isUserSeeking && duration > 0) {
+                if (!DlnaManager.isCasting() && !isUserSeeking && isDurationValid) {
+                    // 防止播放位置超出歌曲总时长导致的拉扯
+                    if (position > duration) position = duration;
                     lastValidProgressMs = position;
+
                     seekBar.setMax(duration);
                     seekBar.setProgress(position);
                     detailSeekBar.setMax(duration);
@@ -688,7 +694,7 @@ public class MainActivity extends Activity {
         btnCapsuleNext = (ImageView) findViewById(R.id.btn_capsule_next);
         btnCapsuleQueue = (ImageView) findViewById(R.id.btn_capsule_queue);
 
-        // 3D 页面专属右侧悬浮播放列表绑定与适配
+        // 3D 专属播放列表抽屉
         layoutVisualizerQueuePanel = (LinearLayout) findViewById(R.id.layout_visualizer_queue_panel);
         btnCloseVisualizerQueue = (Button) findViewById(R.id.btn_close_visualizer_queue);
         lvVisualizerQueue = (ListView) findViewById(R.id.lv_visualizer_queue);
