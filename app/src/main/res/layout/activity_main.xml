@@ -1602,16 +1602,15 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
 
-        <!-- 2. 右上角艺术封面剪影 (带微透羽化) -->
+        <!-- 2. 全屏艺术封面剪影背景 (等比缩放居中裁剪，全屏微透融入暗黑底色) -->
         <ImageView
             android:id="@+id/iv_visualizer_silhouette"
-            android:layout_width="320dp"
-            android:layout_height="320dp"
-            android:layout_gravity="top|right"
-            android:layout_marginTop="-20dp"
-            android:layout_marginRight="-20dp"
-            android:alpha="0.32"
-            android:scaleType="centerCrop" />
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:scaleType="centerCrop"
+            android:alpha="0.18"
+            android:clickable="false"
+            android:focusable="false" />
 
         <!-- 3. 顶部退出按钮 -->
         <LinearLayout
@@ -1789,7 +1788,7 @@
                 android:focusable="true" />
         </LinearLayout>
 
-        <!-- 6. 3D 页面专属右侧悬浮播放列表抽屉 (置于最顶层，彻底解决遮挡问题) -->
+        <!-- 6. 3D 页面专属右侧悬浮播放列表抽屉 -->
         <LinearLayout
             android:id="@+id/layout_visualizer_queue_panel"
             android:layout_width="320dp"
