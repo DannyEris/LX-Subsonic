@@ -318,7 +318,7 @@ public class MainActivity extends Activity {
                 int duration = intent.getIntExtra("duration", 0);
                 int bufferPercent = intent.getIntExtra("bufferPercent", -1);
 
-                // 核心修复 1：严格控制缓冲显示，仅在 0~99% 且当前歌曲未缓存完成时显示，完成或为负时彻底隐藏
+                // 核心修复 1：严格控制缓冲提示，仅在 0%~99% 下载中显示，100% 或完成状态立即彻底隐藏
                 if (bufferPercent >= 0 && bufferPercent < 100) {
                     String bufStr = "缓冲 " + bufferPercent + "%";
                     if (tvBottomBuffer != null) {
@@ -348,7 +348,7 @@ public class MainActivity extends Activity {
                         if (!DlnaManager.isCasting()) manualLyricOffsetMs = 0;
                         updateLyricOffsetStatusView();
 
-                        // 切歌瞬间复位界面与缓冲状态，防止旧数值闪烁残留
+                        // 切歌瞬间复位界面缓冲与进度，防止旧残留数值跳动
                         if (tvBottomBuffer != null) tvBottomBuffer.setVisibility(View.GONE);
                         if (tvDetailBuffer != null) tvDetailBuffer.setVisibility(View.GONE);
 
@@ -376,7 +376,7 @@ public class MainActivity extends Activity {
                     updateFavButtonState(songId);
                 }
 
-                // 核心修复 2：严格防抖门限，播放中且有效时长大于1秒小于2小时才更新进度，阻断流媒体握手初期的 18144s 脏数据拉扯
+                // 核心修复 2：严格门限阻断 18144s 异常时间值对 UI 进度条的拉扯抽搐
                 boolean isDurationValid = (duration > 1000 && duration < 7200000);
                 if (!DlnaManager.isCasting() && !isUserSeeking && isPlaying && isDurationValid) {
                     if (position > duration) position = duration;
@@ -2355,7 +2355,6 @@ public class MainActivity extends Activity {
             }
         }
 
-        // 全屏等比缩放微透背景同步
         if (currentRawCoverBitmap != null && ivVisualizerSilhouette != null) {
             ivVisualizerSilhouette.setImageBitmap(currentRawCoverBitmap);
         }
@@ -3847,6 +3846,7 @@ public class MainActivity extends Activity {
         return Environment.getExternalStorageDirectory().getAbsolutePath() + "/Music";
     }
 
+    // 已彻底移除无用 preloadHandler 引用
     private void performAppExit() {
         new AlertDialog.Builder(this)
                 .setTitle("退出应用")
@@ -3926,6 +3926,7 @@ public class MainActivity extends Activity {
         if (audioVisualizerHelper != null) audioVisualizerHelper.stop();
     }
 
+    // 已彻底移除无用 preloadHandler 引用
     @Override
     protected void onDestroy() {
         super.onDestroy();
