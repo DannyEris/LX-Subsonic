@@ -1156,22 +1156,35 @@
                 android:layout_alignParentRight="true"
                 android:layout_centerVertical="true"
                 android:orientation="horizontal">
+                <!-- 新增：3D动效页面入口按钮 -->
+                <Button
+                    android:id="@+id/btn_detail_visualizer"
+                    android:layout_width="wrap_content"
+                    android:layout_height="34dp"
+                    android:background="@drawable/bg_btn_accent"
+                    android:text="3D"
+                    android:textColor="#00e5ff"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    android:paddingLeft="10dp"
+                    android:paddingRight="10dp" />
                 <Button
                     android:id="@+id/btn_detail_keep_screen"
                     android:layout_width="wrap_content"
                     android:layout_height="34dp"
                     android:background="@drawable/bg_btn_default"
-                    android:text="常亮:关"
+                    android:text="保持亮屏"
                     android:textColor="#e0e0e0"
                     android:textSize="12sp"
                     android:paddingLeft="8dp"
-                    android:paddingRight="8dp" />
+                    android:paddingRight="8dp"
+                    android:layout_marginLeft="6dp" />
                 <Button
                     android:id="@+id/btn_detail_queue"
                     android:layout_width="wrap_content"
                     android:layout_height="34dp"
                     android:background="@drawable/bg_btn_default"
-                    android:text="队列"
+                    android:text="播放列表"
                     android:textColor="#e0e0e0"
                     android:textSize="12sp"
                     android:paddingLeft="8dp"
@@ -1606,4 +1619,207 @@
             </LinearLayout>
         </LinearLayout>
     </LinearLayout>
+    <!-- ================= 3D 音频动效全屏页面 (Overlay) ================= -->
+    <FrameLayout
+        android:id="@+id/layout_visualizer_overlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#0a0b0e"
+        android:clickable="true"
+        android:focusable="true"
+        android:visibility="gone">
+
+        <!-- 1. 3D OpenGL ES 2.0 动态水银渲染层 -->
+        <com.retro.subsonic.Visualizer3DView
+            android:id="@+id/view_visualizer_3d"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <!-- 2. 右上角艺术封面剪影 (带微透羽化) -->
+        <ImageView
+            android:id="@+id/iv_visualizer_silhouette"
+            android:layout_width="320dp"
+            android:layout_height="320dp"
+            android:layout_gravity="top|right"
+            android:layout_marginTop="-20dp"
+            android:layout_marginRight="-20dp"
+            android:alpha="0.32"
+            android:scaleType="centerCrop" />
+
+        <!-- 3. 顶部退出按钮 -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|left"
+            android:padding="16dp">
+            <Button
+                android:id="@+id/btn_close_visualizer"
+                android:layout_width="wrap_content"
+                android:layout_height="34dp"
+                android:background="@drawable/bg_btn_default"
+                android:text="返回"
+                android:textColor="#e0e0e0"
+                android:textSize="12sp"
+                android:paddingLeft="12dp"
+                android:paddingRight="12dp" />
+        </LinearLayout>
+
+        <!-- 4. 沉浸式大字号歌词区域 (中上方居左) -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|left"
+            android:orientation="vertical"
+            android:layout_marginTop="75dp"
+            android:paddingLeft="60dp"
+            android:paddingRight="60dp">
+            <!-- 当前句歌词 (亮白发光聚焦) -->
+            <TextView
+                android:id="@+id/tv_visualizer_current_lyric"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="脆弱的美让我慢慢学会"
+                android:textColor="#FFFFFF"
+                android:textSize="25sp"
+                android:textStyle="bold"
+                android:shadowColor="#80FFFFFF"
+                android:shadowDx="0"
+                android:shadowDy="0"
+                android:shadowRadius="10" />
+            <!-- 下一句歌词 (暗灰微透预告) -->
+            <TextView
+                android:id="@+id/tv_visualizer_next_lyric"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text=""
+                android:textColor="#5A606E"
+                android:textSize="16sp"
+                android:layout_marginTop="8dp" />
+        </LinearLayout>
+
+        <!-- 5. 底部悬浮胶囊控制栏 -->
+        <LinearLayout
+            android:layout_width="660dp"
+            android:layout_height="52dp"
+            android:layout_gravity="bottom|center_horizontal"
+            android:layout_marginBottom="20dp"
+            android:background="@drawable/bg_capsule_player"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingLeft="12dp"
+            android:paddingRight="12dp"
+            android:clickable="true"
+            android:focusable="true">
+
+            <ImageView
+                android:id="@+id/iv_capsule_cover"
+                android:layout_width="34dp"
+                android:layout_height="34dp"
+                android:scaleType="centerCrop"
+                android:src="@drawable/ic_launcher" />
+
+            <LinearLayout
+                android:layout_width="120dp"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_marginLeft="10dp">
+                <TextView
+                    android:id="@+id/tv_capsule_title"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="歌曲名称"
+                    android:textColor="#ffffff"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    android:singleLine="true" />
+                <TextView
+                    android:id="@+id/tv_capsule_artist"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="歌手"
+                    android:textColor="#888c99"
+                    android:textSize="10sp"
+                    android:singleLine="true" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/tv_capsule_current_time"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="00:00"
+                android:textColor="#888c99"
+                android:textSize="10sp"
+                android:layout_marginLeft="6dp" />
+
+            <SeekBar
+                android:id="@+id/capsule_seek_bar"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:max="100" />
+
+            <TextView
+                android:id="@+id/tv_capsule_total_time"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="00:00"
+                android:textColor="#888c99"
+                android:textSize="10sp"
+                android:layout_marginRight="8dp" />
+
+            <!-- 循环模式 -->
+            <ImageView
+                android:id="@+id/btn_capsule_mode"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:scaleType="center"
+                android:background="@android:color/transparent"
+                android:clickable="true"
+                android:focusable="true" />
+
+            <!-- 上一曲 -->
+            <ImageView
+                android:id="@+id/btn_capsule_prev"
+                android:layout_width="30dp"
+                android:layout_height="30dp"
+                android:scaleType="center"
+                android:background="@android:color/transparent"
+                android:layout_marginLeft="6dp"
+                android:clickable="true"
+                android:focusable="true" />
+
+            <!-- 播放/暂停 -->
+            <ImageView
+                android:id="@+id/btn_capsule_play_pause"
+                android:layout_width="34dp"
+                android:layout_height="34dp"
+                android:background="@drawable/bg_btn_circle_play"
+                android:scaleType="center"
+                android:layout_marginLeft="8dp"
+                android:clickable="true"
+                android:focusable="true" />
+
+            <!-- 下一曲 -->
+            <ImageView
+                android:id="@+id/btn_capsule_next"
+                android:layout_width="30dp"
+                android:layout_height="30dp"
+                android:scaleType="center"
+                android:background="@android:color/transparent"
+                android:layout_marginLeft="8dp"
+                android:clickable="true"
+                android:focusable="true" />
+
+            <!-- 打开播放队列面板 -->
+            <ImageView
+                android:id="@+id/btn_capsule_queue"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:scaleType="center"
+                android:background="@android:color/transparent"
+                android:layout_marginLeft="8dp"
+                android:clickable="true"
+                android:focusable="true" />
+        </LinearLayout>
+    </FrameLayout>
 </FrameLayout>
