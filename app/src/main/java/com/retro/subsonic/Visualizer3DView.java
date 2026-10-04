@@ -34,7 +34,7 @@ public class Visualizer3DView extends GLSurfaceView implements GLSurfaceView.Ren
     private float smoothEnergy = 0f;
     private volatile boolean isPlaying = false;
 
-    // 顶点着色器：高度直接与能量挂钩，能量为 0 时呈现完全平整的水银镜面
+    // 顶点着色器：采用三层复合谐波阻尼衰减，振幅降至 0.22，呈现缓和、精准的水银微波动
     private final String vertexShaderCode =
             "uniform mat4 uMvpMatrix;\n" +
             "uniform float uTime;\n" +
@@ -45,24 +45,26 @@ public class Visualizer3DView extends GLSurfaceView implements GLSurfaceView.Ren
             "void main() {\n" +
             "    float r = length(aPosition.xy);\n" +
             "    vDist = r;\n" +
-            "    // 中心向外扩散的高低起伏涟漪\n" +
-            "    float wave1 = sin(r * 14.0 - uTime * 4.0) * (1.0 - smoothstep(0.0, 1.0, r));\n" +
-            "    float wave2 = cos(r * 26.0 - uTime * 6.0) * 0.5 * (1.0 - r);\n" +
-            "    // 移除无条件的 0.08 常量振幅，高度直接由能量驱动\n" +
-            "    float height = (wave1 + wave2) * (uEnergy * 0.42);\n" +
+            "    // 1. 低频主波（平缓浑厚）\n" +
+            "    float w1 = sin(r * 11.0 - uTime * 2.6) * 0.55 * (1.0 - r * 0.75);\n" +
+            "    // 2. 中频涟漪（水面细节）\n" +
+            "    float w2 = cos(r * 22.0 - uTime * 3.8) * 0.30 * (1.0 - r);\n" +
+            "    // 3. 高频微波（精致水银纹理）\n" +
+            "    float w3 = sin(r * 34.0 - uTime * 4.6) * 0.15 * (1.0 - r);\n" +
+            "    // 综合起伏幅度调整为温和精准的 0.22\n" +
+            "    float height = (w1 + w2 + w3) * (uEnergy * 0.22);\n" +
             "    vHeight = height;\n" +
             "    vec3 pos = vec3(aPosition.x, aPosition.y, height);\n" +
             "    gl_Position = uMvpMatrix * vec4(pos, 1.0);\n" +
             "}\n";
 
-    // 片元着色器：纯黑灰渐变、高光水银反光质感
+    // 片元着色器：水银金属反光质感与边缘羽化
     private final String fragmentShaderCode =
             "precision mediump float;\n" +
             "varying float vHeight;\n" +
             "varying float vDist;\n" +
             "void main() {\n" +
-            "    // 凸起波峰呈亮白高光，波谷暗灰\n" +
-            "    float brightness = clamp(vHeight * 6.0 + 0.32, 0.05, 1.0);\n" +
+            "    float brightness = clamp(vHeight * 9.0 + 0.32, 0.06, 1.0);\n" +
             "    vec3 mercury = vec3(0.92, 0.94, 0.98) * brightness;\n" +
             "    float alpha = clamp((1.0 - vDist) * 1.5, 0.0, 1.0);\n" +
             "    gl_FragColor = vec4(mercury * alpha, alpha * 0.85);\n" +
@@ -117,7 +119,7 @@ public class Visualizer3DView extends GLSurfaceView implements GLSurfaceView.Ren
 
     @Override
     public void onSurfaceCreated(GL10 gl, EGLConfig config) {
-        GLES20.glClearColor(0.039f, 0.043f, 0.055f, 1.0f); // 极深黑背景 #0a0b0e
+        GLES20.glClearColor(0.039f, 0.043f, 0.055f, 1.0f);
         GLES20.glEnable(GLES20.GL_BLEND);
         GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA);
 
@@ -139,7 +141,6 @@ public class Visualizer3DView extends GLSurfaceView implements GLSurfaceView.Ren
         GLES20.glViewport(0, 0, width, height);
         float ratio = (float) width / (float) height;
         Matrix.frustumM(projectionMatrix, 0, -ratio * 0.5f, ratio * 0.5f, -0.5f, 0.5f, 1.0f, 10.0f);
-        // 观察相机倾斜仰俯角
         Matrix.setLookAtM(viewMatrix, 0, 0f, -1.35f, 1.15f, 0f, 0.08f, 0f, 0f, 1f, 0f);
     }
 
@@ -148,11 +149,10 @@ public class Visualizer3DView extends GLSurfaceView implements GLSurfaceView.Ren
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT | GLES20.GL_DEPTH_BUFFER_BIT);
 
         if (isPlaying) {
-            // 播放中：时间推进速度随鼓点能量动态加快
-            runningTime += 0.02f + smoothEnergy * 0.035f;
-            smoothEnergy = smoothEnergy * 0.70f + targetEnergy * 0.30f;
+            // 放慢时间步进，平缓推进
+            runningTime += 0.016f + smoothEnergy * 0.018f;
+            smoothEnergy = smoothEnergy * 0.78f + targetEnergy * 0.22f;
         } else {
-            // 暂停中：时间完全冻结，水银能量平滑衰减归零，回归宁静平坦的镜面
             smoothEnergy = smoothEnergy * 0.85f;
             if (smoothEnergy < 0.001f) {
                 smoothEnergy = 0f;
