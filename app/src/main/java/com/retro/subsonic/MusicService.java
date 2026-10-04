@@ -6,36 +6,63 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.media.AudioManager;
 import android.media.MediaPlayer;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.IBinder;
-import android.os.Looper;
-
+import android.os.PowerManager;
 import org.json.JSONArray;
 import org.json.JSONObject;
-
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Random;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 public class MusicService extends Service {
+    public static final String BROADCAST_STATUS = "com.retro.subsonic.STATUS";
 
-    public static final String BROADCAST_STATUS = "com.retro.subsonic.STATUS_CHANGE";
-
-    public static final String ACTION_PLAY_INDEX = "ACTION_PLAY_INDEX";
-    public static final String ACTION_TOGGLE = "ACTION_TOGGLE";
-    public static final String ACTION_NEXT = "ACTION_NEXT";
-    public static final String ACTION_PREV = "ACTION_PREV";
-    public static final String ACTION_SEEK = "ACTION_SEEK";
-    public static final String ACTION_CYCLE_MODE = "ACTION_CYCLE_MODE";
-    public static final String ACTION_SET_MUTE = "ACTION_SET_MUTE";
+    public static final String ACTION_TOGGLE = "TOGGLE";
+    public static final String ACTION_PLAY_INDEX = "PLAY_INDEX";
+    public static final String ACTION_NEXT = "NEXT";
+    public static final String ACTION_PREV = "PREV";
+    public static final String ACTION_SEEK = "SEEK";
+    public static final String ACTION_CYCLE_MODE = "CYCLE_MODE";
+    public static final String ACTION_SET_MUTE = "SET_MUTE";
 
     public static final int MODE_LOOP_ALL = 0;
-    public static final int MODE_SHUFFLE = 1;
-    public static final int MODE_SINGLE = 2;
+    public static final int MODE_SINGLE = 1;
+    public static final int MODE_SHUFFLE = 2;
+
+    private static final ArrayList<SongItem> playlist = new ArrayList<SongItem>();
+    private static int currentIndex = -1;
+    private static int currentMode = MODE_LOOP_ALL;
+
+    private MediaPlayer mediaPlayer;
+    private LocalStreamProxy currentProxy;
+    private boolean isMuted = false;
+    private volatile boolean isChangingSong = false; // 换歌中防抖锁，防止脏数据发出
+    private int lastBufferPercent = -1;
+
+    private Handler progressHandler = new Handler();
+    private Runnable progressRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (mediaPlayer != null && !isChangingSong) {
+                try {
+                    if (mediaPlayer.isPlaying()) {
+                        int pos = mediaPlayer.getCurrentPosition();
+                        int dur = mediaPlayer.getDuration();
+                        // 过滤未就绪时的无效或极大异常时长（大于 2 小时）
+                        if (dur > 0 && dur < 7200000) {
+                            broadcastStatus(true, pos, dur);
+                        }
+                    }
+                } catch (Throwable ignored) {}
+            }
+            progressHandler.postDelayed(this, 800);
+        }
+    };
 
     public static class SongItem {
         public String id;
@@ -55,34 +82,6 @@ public class MusicService extends Service {
         }
     }
 
-    private static ArrayList<SongItem> playlist = new ArrayList<SongItem>();
-    private static int currentIndex = -1;
-    private static int currentMode = MODE_LOOP_ALL;
-
-    private MediaPlayer mediaPlayer;
-    private LocalStreamProxy streamProxy;
-    private Handler progressHandler = new Handler(Looper.getMainLooper());
-    private boolean isMuted = false;
-    private int currentBufferPercent = -1;
-
-    // 失败重试与超时控制计数器
-    private int currentSongRetryCount = 0;
-    private int maxRetryCount = 3;
-    private int timeoutSec = 30;
-
-    // 专属后台单线程执行器，杜绝主线程阻塞与 ANR
-    private final ExecutorService playbackExecutor = Executors.newSingleThreadExecutor();
-
-    private Runnable progressRunnable = new Runnable() {
-        @Override
-        public void run() {
-            if (mediaPlayer != null && mediaPlayer.isPlaying()) {
-                broadcastStatus();
-            }
-            progressHandler.postDelayed(this, 1000);
-        }
-    };
-
     public static ArrayList<SongItem> getPlaylist() {
         return playlist;
     }
@@ -97,9 +96,10 @@ public class MusicService extends Service {
 
     public static void setQueue(ArrayList<SongItem> newQueue, int startIndex, Context context) {
         playlist.clear();
-        playlist.addAll(newQueue);
+        if (newQueue != null) {
+            playlist.addAll(newQueue);
+        }
         currentIndex = startIndex;
-        savePlaybackState(context);
         Intent intent = new Intent(context, MusicService.class);
         intent.setAction(ACTION_PLAY_INDEX);
         intent.putExtra("target_index", startIndex);
@@ -109,53 +109,50 @@ public class MusicService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
-        currentMode = getSharedPreferences("subsonic_cfg", MODE_PRIVATE).getInt("play_mode", MODE_LOOP_ALL);
-        loadConfig();
-        mediaPlayer = new MediaPlayer();
-        setupMediaPlayerListeners();
+        initMediaPlayer();
         progressHandler.post(progressRunnable);
     }
 
-    private void loadConfig() {
-        try {
-            SharedPreferences sp = getSharedPreferences("subsonic_cfg", MODE_PRIVATE);
-            String tStr = sp.getString("timeout_sec", "30");
-            String rStr = sp.getString("retry_count", "3");
-            timeoutSec = Math.max(5, Integer.parseInt(tStr.trim()));
-            maxRetryCount = Math.max(0, Integer.parseInt(rStr.trim()));
-        } catch (Exception ignored) {
-            timeoutSec = 30;
-            maxRetryCount = 3;
+    private void initMediaPlayer() {
+        if (mediaPlayer != null) {
+            try { mediaPlayer.release(); } catch (Throwable ignored) {}
         }
-    }
+        mediaPlayer = new MediaPlayer();
+        mediaPlayer.setWakeMode(getApplicationContext(), PowerManager.PARTIAL_WAKE_LOCK);
+        mediaPlayer.setAudioStreamType(AudioManager.STREAM_MUSIC);
 
-    private void setupMediaPlayerListeners() {
         mediaPlayer.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
             @Override
             public void onPrepared(MediaPlayer mp) {
-                currentSongRetryCount = 0; // 起播成功后重置重试计数
-                float v = isMuted ? 0.0f : 1.0f;
-                mp.setVolume(v, v);
+                isChangingSong = false;
+                lastBufferPercent = 100;
+                applyMuteState();
                 mp.start();
                 AudioEffectsManager.getInstance().attachMediaPlayer(mp, MusicService.this);
-                broadcastStatus();
-                startForegroundNotification();
+                int dur = mp.getDuration();
+                broadcastStatus(true, 0, (dur > 0 && dur < 7200000) ? dur : 0);
             }
         });
 
         mediaPlayer.setOnCompletionListener(new MediaPlayer.OnCompletionListener() {
             @Override
             public void onCompletion(MediaPlayer mp) {
-                onTrackCompleted();
+                handleAutoNext();
             }
         });
 
-        // 捕获解码器异常，结合重试计数器执行重连
         mediaPlayer.setOnErrorListener(new MediaPlayer.OnErrorListener() {
             @Override
             public boolean onError(MediaPlayer mp, int what, int extra) {
-                handlePlaybackFailure("播放器底层解码异常 (" + what + "," + extra + ")");
+                isChangingSong = false;
                 return true;
+            }
+        });
+
+        mediaPlayer.setOnBufferingUpdateListener(new MediaPlayer.OnBufferingUpdateListener() {
+            @Override
+            public void onBufferingUpdate(MediaPlayer mp, int percent) {
+                lastBufferPercent = percent;
             }
         });
     }
@@ -165,261 +162,189 @@ public class MusicService extends Service {
         if (intent != null && intent.getAction() != null) {
             String act = intent.getAction();
             if (ACTION_PLAY_INDEX.equals(act)) {
-                int idx = intent.getIntExtra("target_index", currentIndex);
-                currentSongRetryCount = 0; // 手动切歌或换曲时清零计数
-                playIndex(idx);
+                int target = intent.getIntExtra("target_index", 0);
+                playSong(target);
             } else if (ACTION_TOGGLE.equals(act)) {
-                toggle();
+                togglePlayPause();
             } else if (ACTION_NEXT.equals(act)) {
-                next();
+                playNextManual();
             } else if (ACTION_PREV.equals(act)) {
-                prev();
+                playPrevManual();
             } else if (ACTION_SEEK.equals(act)) {
                 int pos = intent.getIntExtra("position", 0);
-                seek(pos);
+                if (mediaPlayer != null) {
+                    try { mediaPlayer.seekTo(pos); } catch (Throwable ignored) {}
+                }
             } else if (ACTION_CYCLE_MODE.equals(act)) {
-                cycleMode();
+                currentMode = (currentMode + 1) % 3;
+                broadcastCurrentState();
             } else if (ACTION_SET_MUTE.equals(act)) {
                 isMuted = intent.getBooleanExtra("is_muted", false);
-                if (mediaPlayer != null) {
-                    float v = isMuted ? 0.0f : 1.0f;
-                    mediaPlayer.setVolume(v, v);
-                }
+                applyMuteState();
             }
         }
         return START_STICKY;
     }
 
-    private void playIndex(final int index) {
+    private void applyMuteState() {
+        if (mediaPlayer != null) {
+            float vol = isMuted ? 0.0f : 1.0f;
+            try { mediaPlayer.setVolume(vol, vol); } catch (Throwable ignored) {}
+        }
+    }
+
+    private void playSong(int index) {
         if (index < 0 || index >= playlist.size()) return;
         currentIndex = index;
-        savePlaybackState(this);
+        SongItem item = playlist.get(index);
+        isChangingSong = true;
+        lastBufferPercent = -1;
 
-        currentBufferPercent = 0;
-        broadcastStatus();
+        // 立即发送复位广播，清空旧曲目的状态与进度
+        broadcastStatus(false, 0, 0);
 
-        loadConfig(); // 每次切歌实时同步用户设置的最新超时与重试配置
-
-        playbackExecutor.execute(new Runnable() {
-            @Override
-            public void run() {
-                doPlayIndexBackground(index);
-            }
-        });
-    }
-
-    private synchronized void doPlayIndexBackground(int index) {
-        if (index < 0 || index >= playlist.size()) return;
-        final SongItem item = playlist.get(index);
-
-        if (streamProxy != null) {
-            streamProxy.stop();
-            streamProxy = null;
-        }
-
-        // 本地音频文件直接解码起播
-        if (item.streamUrl != null && (item.streamUrl.startsWith("file://") || item.streamUrl.startsWith("/"))) {
-            currentBufferPercent = 100;
-            startMediaPlayer(item.streamUrl);
-            return;
-        }
-
-        // 本地已有完整缓存直接起播
-        if (CacheManager.isSongCached(this, item.id)) {
-            File cachedFile = CacheManager.getSongFile(this, item.id);
-            currentBufferPercent = 100;
-            startMediaPlayer("file://" + cachedFile.getAbsolutePath());
-            return;
+        if (currentProxy != null) {
+            currentProxy.stop();
+            currentProxy = null;
         }
 
         try {
-            streamProxy = new LocalStreamProxy(this, item.id, item.streamUrl, new LocalStreamProxy.ProxyListener() {
+            mediaPlayer.reset();
+            applyMuteState();
+
+            // 核心修复点：优先检查是否命中本地预缓存，命中则直接以 file:// 协议秒播
+            if (CacheManager.isSongCached(this, item.id)) {
+                File localCachedFile = CacheManager.getSongFile(this, item.id);
+                mediaPlayer.setDataSource(this, Uri.fromFile(localCachedFile));
+                mediaPlayer.prepareAsync();
+                savePlaybackState();
+                return;
+            }
+
+            // 本地扫描的音乐文件直接播放
+            if (item.streamUrl != null && item.streamUrl.startsWith("file://")) {
+                mediaPlayer.setDataSource(this, Uri.parse(item.streamUrl));
+                mediaPlayer.prepareAsync();
+                savePlaybackState();
+                return;
+            }
+
+            // 尚未缓存的远程音频走本地流代理缓冲
+            currentProxy = new LocalStreamProxy(this, item.id, item.streamUrl, new LocalStreamProxy.ProxyListener() {
                 @Override
                 public void onProgress(int percent) {
-                    currentBufferPercent = percent;
-                    broadcastStatus();
+                    lastBufferPercent = percent;
                 }
 
                 @Override
-                public void onCached(File cachedFile) {
-                    currentBufferPercent = 100;
-                    broadcastStatus();
-                }
+                public void onCached(File cachedFile) {}
 
                 @Override
-                public void onError(String reason) {
-                    handlePlaybackFailure(reason);
-                }
+                public void onError(String reason) {}
             });
-            String localProxyUrl = streamProxy.start();
-            startMediaPlayer(localProxyUrl);
-        } catch (Exception e) {
-            startMediaPlayer(item.streamUrl);
-        }
-    }
 
-    private synchronized void startMediaPlayer(String playUrl) {
-        try {
-            if (mediaPlayer == null) {
-                mediaPlayer = new MediaPlayer();
-                setupMediaPlayerListeners();
-            } else {
-                mediaPlayer.reset();
-            }
-
-            if (playUrl.startsWith("file://")) {
-                mediaPlayer.setDataSource(this, Uri.parse(playUrl));
-            } else {
-                mediaPlayer.setDataSource(playUrl);
-            }
-
+            String proxyUrl = currentProxy.start();
+            mediaPlayer.setDataSource(this, Uri.parse(proxyUrl));
             mediaPlayer.prepareAsync();
-        } catch (Exception e) {
-            handlePlaybackFailure("MediaPlayer prepare失败: " + e.getMessage());
+            savePlaybackState();
+
+        } catch (Throwable t) {
+            isChangingSong = false;
         }
     }
 
-    // 核心自动重试逻辑：结合配置判断是否重试或提示失败
-    private void handlePlaybackFailure(final String reason) {
-        if (currentSongRetryCount < maxRetryCount) {
-            currentSongRetryCount++;
-            currentBufferPercent = 0;
-            broadcastStatus();
-
-            playbackExecutor.execute(new Runnable() {
-                @Override
-                public void run() {
-                    try {
-                        Thread.sleep(1000); // 间隔 1 秒后自动重试
-                    } catch (InterruptedException ignored) {}
-                    doPlayIndexBackground(currentIndex);
-                }
-            });
-        } else {
-            currentBufferPercent = -1; // 超过最大重试次数，标记失败并通知 UI
-            broadcastStatus();
-        }
-    }
-
-    private void onTrackCompleted() {
-        if (currentMode == MODE_SINGLE) {
-            playIndex(currentIndex);
-        } else {
-            next();
-        }
-    }
-
-    private void toggle() {
-        if (mediaPlayer != null) {
+    private void togglePlayPause() {
+        if (mediaPlayer == null) return;
+        try {
             if (mediaPlayer.isPlaying()) {
                 mediaPlayer.pause();
+                broadcastCurrentState();
             } else {
-                float v = isMuted ? 0.0f : 1.0f;
-                mediaPlayer.setVolume(v, v);
                 mediaPlayer.start();
+                broadcastCurrentState();
             }
-            broadcastStatus();
-        } else if (currentIndex >= 0 && currentIndex < playlist.size()) {
-            playIndex(currentIndex);
-        }
-    }
-
-    private void next() {
-        if (playlist.isEmpty()) return;
-        currentSongRetryCount = 0;
-        if (currentMode == MODE_SHUFFLE && playlist.size() > 1) {
-            int nextIdx;
-            do {
-                nextIdx = new Random().nextInt(playlist.size());
-            } while (nextIdx == currentIndex);
-            playIndex(nextIdx);
-        } else {
-            int nextIdx = (currentIndex + 1) % playlist.size();
-            playIndex(nextIdx);
-        }
-    }
-
-    private void prev() {
-        if (playlist.isEmpty()) return;
-        currentSongRetryCount = 0;
-        int prevIdx = (currentIndex - 1 + playlist.size()) % playlist.size();
-        playIndex(prevIdx);
-    }
-
-    private void seek(int pos) {
-        if (mediaPlayer != null) {
-            try {
-                mediaPlayer.seekTo(pos);
-            } catch (Exception ignored) {}
-        }
-    }
-
-    private void cycleMode() {
-        currentMode = (currentMode + 1) % 3;
-        getSharedPreferences("subsonic_cfg", MODE_PRIVATE).edit().putInt("play_mode", currentMode).apply();
-        broadcastStatus();
-    }
-
-    private void broadcastStatus() {
-        Intent intent = new Intent(BROADCAST_STATUS);
-        boolean isPlaying = mediaPlayer != null && mediaPlayer.isPlaying();
-        intent.putExtra("isPlaying", isPlaying);
-        intent.putExtra("mode", currentMode);
-        intent.putExtra("bufferPercent", currentBufferPercent);
-
-        if (currentIndex >= 0 && currentIndex < playlist.size()) {
-            SongItem song = playlist.get(currentIndex);
-            intent.putExtra("songId", song.id);
-            intent.putExtra("title", song.title);
-            intent.putExtra("artist", song.artist);
-            intent.putExtra("coverArtId", song.coverArtId);
-            intent.putExtra("quality", song.quality);
-            intent.putExtra("streamUrl", song.streamUrl);
-        }
-
-        int pos = (mediaPlayer != null) ? mediaPlayer.getCurrentPosition() : 0;
-        int dur = (mediaPlayer != null) ? mediaPlayer.getDuration() : 0;
-        intent.putExtra("position", pos);
-        intent.putExtra("duration", dur);
-
-        sendBroadcast(intent);
-    }
-
-    private void startForegroundNotification() {
-        try {
-            Notification.Builder builder = new Notification.Builder(this)
-                    .setSmallIcon(R.drawable.ic_launcher)
-                    .setContentTitle(currentIndex >= 0 && currentIndex < playlist.size() ? playlist.get(currentIndex).title : "Subsonic 音乐")
-                    .setContentText(currentIndex >= 0 && currentIndex < playlist.size() ? playlist.get(currentIndex).artist : "正在播放")
-                    .setContentIntent(PendingIntent.getActivity(this, 0, new Intent(this, MainActivity.class), PendingIntent.FLAG_UPDATE_CURRENT));
-            startForeground(1001, builder.build());
         } catch (Throwable ignored) {}
     }
 
-    public static void savePlaybackState(Context context) {
+    private void playNextManual() {
+        if (playlist.isEmpty()) return;
+        int next = (currentIndex + 1) % playlist.size();
+        playSong(next);
+    }
+
+    private void playPrevManual() {
+        if (playlist.isEmpty()) return;
+        int prev = (currentIndex - 1 + playlist.size()) % playlist.size();
+        playSong(prev);
+    }
+
+    private void handleAutoNext() {
+        if (playlist.isEmpty()) return;
+        if (currentMode == MODE_SINGLE) {
+            playSong(currentIndex);
+        } else if (currentMode == MODE_SHUFFLE) {
+            int r = new Random().nextInt(playlist.size());
+            playSong(r);
+        } else {
+            playNextManual();
+        }
+    }
+
+    private void broadcastStatus(boolean isPlaying, int position, int duration) {
+        if (currentIndex < 0 || currentIndex >= playlist.size()) return;
+        SongItem cur = playlist.get(currentIndex);
+        Intent intent = new Intent(BROADCAST_STATUS);
+        intent.putExtra("isPlaying", isPlaying);
+        intent.putExtra("mode", currentMode);
+        intent.putExtra("songId", cur.id);
+        intent.putExtra("title", cur.title);
+        intent.putExtra("artist", cur.artist);
+        intent.putExtra("coverArtId", cur.coverArtId);
+        intent.putExtra("quality", cur.quality);
+        intent.putExtra("streamUrl", cur.streamUrl);
+        intent.putExtra("position", position);
+        intent.putExtra("duration", duration);
+        intent.putExtra("bufferPercent", lastBufferPercent);
+        sendBroadcast(intent);
+    }
+
+    private void broadcastCurrentState() {
+        if (mediaPlayer != null && !isChangingSong) {
+            try {
+                boolean playing = mediaPlayer.isPlaying();
+                int pos = mediaPlayer.getCurrentPosition();
+                int dur = mediaPlayer.getDuration();
+                broadcastStatus(playing, pos, (dur > 0 && dur < 7200000) ? dur : 0);
+            } catch (Throwable ignored) {}
+        }
+    }
+
+    private void savePlaybackState() {
+        if (currentIndex < 0 || currentIndex >= playlist.size()) return;
         try {
-            SharedPreferences sp = context.getSharedPreferences("subsonic_cfg", MODE_PRIVATE);
+            SharedPreferences sp = getSharedPreferences("subsonic_playback_state", MODE_PRIVATE);
             JSONArray arr = new JSONArray();
             for (SongItem item : playlist) {
-                JSONObject o = new JSONObject();
-                o.put("id", item.id);
-                o.put("title", item.title);
-                o.put("artist", item.artist);
-                o.put("streamUrl", item.streamUrl);
-                o.put("coverArtId", item.coverArtId);
-                o.put("quality", item.quality);
-                arr.put(o);
+                JSONObject obj = new JSONObject();
+                obj.put("id", item.id);
+                obj.put("title", item.title);
+                obj.put("artist", item.artist);
+                obj.put("streamUrl", item.streamUrl);
+                obj.put("coverArtId", item.coverArtId);
+                obj.put("quality", item.quality);
+                arr.put(obj);
             }
-            sp.edit().putString("saved_playlist", arr.toString())
-                    .putInt("saved_index", currentIndex)
-                    .apply();
-        } catch (Exception ignored) {}
+            sp.edit().putString("playlist_json", arr.toString())
+                    .putInt("current_index", currentIndex)
+                    .putInt("current_mode", currentMode)
+                    .commit();
+        } catch (Throwable ignored) {}
     }
 
     public static boolean restorePlaybackState(Context context) {
         try {
-            SharedPreferences sp = context.getSharedPreferences("subsonic_cfg", MODE_PRIVATE);
-            String json = sp.getString("saved_playlist", null);
+            SharedPreferences sp = context.getSharedPreferences("subsonic_playback_state", MODE_PRIVATE);
+            String json = sp.getString("playlist_json", null);
             if (json == null) return false;
             JSONArray arr = new JSONArray(json);
             playlist.clear();
@@ -429,14 +354,15 @@ public class MusicService extends Service {
                         o.getString("id"),
                         o.getString("title"),
                         o.getString("artist"),
-                        o.getString("streamUrl"),
+                        o.optString("streamUrl", ""),
                         o.optString("coverArtId", null),
-                        o.optString("quality", "MP3")
+                        o.optString("quality", "")
                 ));
             }
-            currentIndex = sp.getInt("saved_index", 0);
+            currentIndex = sp.getInt("current_index", 0);
+            currentMode = sp.getInt("current_mode", MODE_LOOP_ALL);
             return !playlist.isEmpty();
-        } catch (Exception e) {
+        } catch (Throwable t) {
             return false;
         }
     }
@@ -445,20 +371,13 @@ public class MusicService extends Service {
     public void onDestroy() {
         super.onDestroy();
         progressHandler.removeCallbacksAndMessages(null);
-        playbackExecutor.shutdownNow();
-        if (streamProxy != null) {
-            streamProxy.stop();
-            streamProxy = null;
+        if (currentProxy != null) {
+            currentProxy.stop();
         }
         if (mediaPlayer != null) {
-            try {
-                AudioEffectsManager.getInstance().detach();
-                mediaPlayer.stop();
-                mediaPlayer.release();
-            } catch (Exception ignored) {}
+            try { mediaPlayer.release(); } catch (Throwable ignored) {}
             mediaPlayer = null;
         }
-        stopForeground(true);
     }
 
     @Override
