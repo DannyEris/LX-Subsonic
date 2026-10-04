@@ -7,26 +7,17 @@ import android.media.audiofx.BassBoost;
 import android.media.audiofx.Equalizer;
 import android.media.audiofx.PresetReverb;
 import android.media.audiofx.Virtualizer;
-
 import java.lang.ref.WeakReference;
 
-public synchronized int getAudioSessionId() {
-        return currentSessionId;
-    }
-
 public class AudioEffectsManager {
-
     private static AudioEffectsManager instance;
-
     private Equalizer equalizer;
     private BassBoost bassBoost;
     private Virtualizer virtualizer;
     private PresetReverb presetReverb;
-
     private WeakReference<MediaPlayer> mediaPlayerRef;
     private WeakReference<Context> contextRef;
     private int currentSessionId = 0;
-
     private boolean isEnabled = true;
     private short savedReverbPreset = PresetReverb.PRESET_NONE;
     private short savedBassStrength = 0;
@@ -42,11 +33,15 @@ public class AudioEffectsManager {
 
     private AudioEffectsManager() {}
 
+    // 供 3D 音频频谱采集器调用的公开 SessionId 接口
+    public synchronized int getAudioSessionId() {
+        return currentSessionId;
+    }
+
     public synchronized void attachMediaPlayer(MediaPlayer mp, Context context) {
         this.contextRef = new WeakReference<Context>(context);
         this.mediaPlayerRef = new WeakReference<MediaPlayer>(mp);
         if (mp == null) return;
-
         int sessionId = mp.getAudioSessionId();
         loadSavedConfig(context);
         initEffects(sessionId);
@@ -65,8 +60,7 @@ public class AudioEffectsManager {
 
     private void initEffects(int sessionId) {
         currentSessionId = sessionId;
-
-        // 1. 初始化均衡器
+        // 1. 均衡器
         try {
             if (equalizer != null) {
                 try { equalizer.release(); } catch (Throwable ignored) {}
@@ -79,8 +73,7 @@ public class AudioEffectsManager {
         } catch (Throwable t) {
             equalizer = null;
         }
-
-        // 2. 初始化低音增强
+        // 2. 低音增强
         try {
             if (bassBoost != null) {
                 try { bassBoost.release(); } catch (Throwable ignored) {}
@@ -93,8 +86,7 @@ public class AudioEffectsManager {
         } catch (Throwable t) {
             bassBoost = null;
         }
-
-        // 3. 初始化 3D 虚拟现场
+        // 3. 3D 虚拟环绕
         try {
             if (virtualizer != null) {
                 try { virtualizer.release(); } catch (Throwable ignored) {}
@@ -107,8 +99,7 @@ public class AudioEffectsManager {
         } catch (Throwable t) {
             virtualizer = null;
         }
-
-        // 4. 修复环境音效 (混响绑定全局 Session 0)
+        // 4. 预设混响
         try {
             if (presetReverb != null) {
                 try { presetReverb.release(); } catch (Throwable ignored) {}
@@ -127,12 +118,10 @@ public class AudioEffectsManager {
         }
     }
 
-    // 将混响路由至播放器并打开 1.0f 满级发送量
     public synchronized void applyReverbToPlayer() {
         if (mediaPlayerRef == null) return;
         MediaPlayer mp = mediaPlayerRef.get();
         if (mp == null) return;
-
         try {
             if (presetReverb != null) {
                 mp.attachAuxEffect(presetReverb.getId());
@@ -145,7 +134,6 @@ public class AudioEffectsManager {
     public synchronized void setEnabled(boolean enabled) {
         this.isEnabled = enabled;
         saveSetting("effects_enabled", enabled);
-
         if (equalizer != null) {
             try { equalizer.setEnabled(enabled); } catch (Throwable ignored) {}
         }
@@ -166,7 +154,6 @@ public class AudioEffectsManager {
     public synchronized void setPresetReverb(short preset) {
         this.savedReverbPreset = preset;
         saveSetting("reverb_preset", (int) preset);
-
         if (presetReverb != null) {
             try {
                 presetReverb.setPreset(preset);
@@ -181,7 +168,6 @@ public class AudioEffectsManager {
     public synchronized void setBassBoostStrength(short strength) {
         this.savedBassStrength = strength;
         saveSetting("bass_strength", (int) strength);
-
         if (bassBoost != null && bassBoost.getStrengthSupported()) {
             try {
                 bassBoost.setStrength(strength);
@@ -195,7 +181,6 @@ public class AudioEffectsManager {
     public synchronized void setVirtualizerStrength(short strength) {
         this.savedVirtualizerStrength = strength;
         saveSetting("virtualizer_strength", (int) strength);
-
         if (virtualizer != null && virtualizer.getStrengthSupported()) {
             try {
                 virtualizer.setStrength(strength);
@@ -211,7 +196,6 @@ public class AudioEffectsManager {
     public synchronized void setEqualizerPreset(short preset) {
         this.savedEqualizerPreset = preset;
         saveSetting("equalizer_preset", (int) preset);
-
         if (equalizer != null && preset >= 0 && preset < equalizer.getNumberOfPresets()) {
             try {
                 equalizer.usePreset(preset);
