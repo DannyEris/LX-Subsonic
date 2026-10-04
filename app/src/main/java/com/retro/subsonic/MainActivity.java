@@ -3856,7 +3856,6 @@ public class MainActivity extends Activity {
                     public void onClick(DialogInterface dialog, int which) {
                         DlnaManager.disconnect();
                         if (audioVisualizerHelper != null) audioVisualizerHelper.stop();
-                        preloadHandler.removeCallbacksAndMessages(null);
                         SongPreloadManager.getInstance().cancel();
                         stopService(new Intent(MainActivity.this, MusicService.class));
                         finish();
@@ -3932,7 +3931,6 @@ public class MainActivity extends Activity {
         super.onDestroy();
         try { unregisterReceiver(statusReceiver); } catch (Exception ignored) {}
         dlnaSyncHandler.removeCallbacksAndMessages(null);
-        preloadHandler.removeCallbacksAndMessages(null);
         SongPreloadManager.getInstance().cancel();
         if (audioVisualizerHelper != null) audioVisualizerHelper.stop();
     }
