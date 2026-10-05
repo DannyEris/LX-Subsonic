@@ -1613,10 +1613,12 @@
             android:focusable="false" />
 
         <!-- 3. 顶部退出按钮 -->
+        <!-- 3. 顶部退出与导航栏模式控制按钮 -->
         <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="top|left"
+            android:orientation="horizontal"
             android:padding="16dp">
             <Button
                 android:id="@+id/btn_close_visualizer"
@@ -1628,6 +1630,17 @@
                 android:textSize="12sp"
                 android:paddingLeft="12dp"
                 android:paddingRight="12dp" />
+            <Button
+                android:id="@+id/btn_visualizer_nav_mode"
+                android:layout_width="wrap_content"
+                android:layout_height="34dp"
+                android:background="@drawable/bg_btn_default"
+                android:text="底栏: 灭灯"
+                android:textColor="#00e5ff"
+                android:textSize="12sp"
+                android:paddingLeft="12dp"
+                android:paddingRight="12dp"
+                android:layout_marginLeft="10dp" />
         </LinearLayout>
 
         <!-- 4. 沉浸式大字号歌词区域 (中上方居左) -->
