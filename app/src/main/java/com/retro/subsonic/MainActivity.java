@@ -2377,14 +2377,22 @@ public class MainActivity extends Activity {
             });
         }
 
-        // 点击 3D 胶囊栏歌曲封面弹出/关闭歌曲列表抽屉
+        // 点击 3D 胶囊栏歌曲封面、歌曲名字（及歌手）弹出/关闭歌曲列表抽屉
+        View.OnClickListener toggleQueueListener = new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                toggleVisualizerQueuePanel();
+            }
+        };
+
         if (ivCapsuleCover != null) {
-            ivCapsuleCover.setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    toggleVisualizerQueuePanel();
-                }
-            });
+            ivCapsuleCover.setOnClickListener(toggleQueueListener);
+        }
+        if (tvCapsuleTitle != null) {
+            tvCapsuleTitle.setOnClickListener(toggleQueueListener);
+        }
+        if (tvCapsuleArtist != null) {
+            tvCapsuleArtist.setOnClickListener(toggleQueueListener);
         }
 
         // 全屏监听回调：在强隐或灭灯模式下虚拟按键弹出后延时自动重隐
