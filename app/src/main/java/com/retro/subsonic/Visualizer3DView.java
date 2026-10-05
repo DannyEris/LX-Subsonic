@@ -1,10 +1,13 @@
 package com.retro.subsonic;
 
 import android.content.Context;
+import android.graphics.PixelFormat;
 import android.opengl.GLES20;
 import android.opengl.GLSurfaceView;
 import android.opengl.Matrix;
+import android.os.SystemClock;
 import android.util.AttributeSet;
+
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
@@ -13,61 +16,75 @@ import javax.microedition.khronos.opengles.GL10;
 
 public class Visualizer3DView extends GLSurfaceView implements GLSurfaceView.Renderer {
 
-    private static final int RINGS = 36;    // 径向同心环数
-    private static final int SECTORS = 64;  // 每环圆周采样数
-    private static final int VERTEX_COUNT = (RINGS + 1) * SECTORS;
+    // 默认基准仰角与允许调节的角度范围
+    public static final float DEFAULT_PITCH = 45.0f;
+    public static final float MIN_PITCH = 15.0f;
+    public static final float MAX_PITCH = 80.0f;
 
-    private FloatBuffer vertexBuffer;
-    private int programId;
-    private int aPosLoc;
-    private int uMvpMatrixLoc;
-    private int uTimeLoc;
-    private int uEnergyLoc;
-
-    private final float[] modelMatrix = new float[16];
-    private final float[] viewMatrix = new float[16];
-    private final float[] projectionMatrix = new float[16];
-    private final float[] mvpMatrix = new float[16];
-
-    private float runningTime = 0f;
-    private volatile float targetEnergy = 0f;
-    private float smoothEnergy = 0f;
+    private volatile float currentPitch = DEFAULT_PITCH;
+    private volatile float targetPitch = DEFAULT_PITCH;
+    private volatile float currentEnergy = 0.0f;
+    private volatile float targetEnergy = 0.0f;
     private volatile boolean isPlaying = false;
 
-    // 顶点着色器：采用三层复合谐波阻尼衰减，振幅降至 0.22，呈现缓和、精准的水银微波动
-    private final String vertexShaderCode =
-            "uniform mat4 uMvpMatrix;\n" +
-            "uniform float uTime;\n" +
+    // 预分配矩阵，避免在渲染循环中触发 Dalvik GC
+    private final float[] mvpMatrix = new float[16];
+    private final float[] projMatrix = new float[16];
+    private final float[] viewMatrix = new float[16];
+    private final float[] modelMatrix = new float[16];
+
+    // 网格参数
+    private static final int GRID_COLS = 32;
+    private static final int GRID_ROWS = 32;
+    private static final float X_MIN = -3.2f;
+    private static final float X_MAX = 3.2f;
+    private static final float Z_MIN = -4.5f;
+    private static final float Z_MAX = 1.5f;
+
+    private FloatBuffer vertexBuffer;
+    private int vertexCount = 0;
+    private int program = 0;
+    private int uMVPMatrixLoc = -1;
+    private int uEnergyLoc = -1;
+    private int uTimeLoc = -1;
+    private int aPosLoc = -1;
+
+    private long lastTimeMs = 0;
+    private float elapsedTime = 0.0f;
+
+    // GLSL 顶点着色器 (动态波浪与赛博朋克渐变着色)
+    private static final String VERTEX_SHADER =
+            "uniform mat4 uMVPMatrix;\n" +
             "uniform float uEnergy;\n" +
+            "uniform float uTime;\n" +
             "attribute vec3 aPosition;\n" +
-            "varying float vHeight;\n" +
-            "varying float vDist;\n" +
+            "varying vec4 vColor;\n" +
             "void main() {\n" +
-            "    float r = length(aPosition.xy);\n" +
-            "    vDist = r;\n" +
-            "    // 1. 低频主波（平缓浑厚）\n" +
-            "    float w1 = sin(r * 11.0 - uTime * 2.6) * 0.55 * (1.0 - r * 0.75);\n" +
-            "    // 2. 中频涟漪（水面细节）\n" +
-            "    float w2 = cos(r * 22.0 - uTime * 3.8) * 0.30 * (1.0 - r);\n" +
-            "    // 3. 高频微波（精致水银纹理）\n" +
-            "    float w3 = sin(r * 34.0 - uTime * 4.6) * 0.15 * (1.0 - r);\n" +
-            "    // 综合起伏幅度调整为温和精准的 0.22\n" +
-            "    float height = (w1 + w2 + w3) * (uEnergy * 0.22);\n" +
-            "    vHeight = height;\n" +
-            "    vec3 pos = vec3(aPosition.x, aPosition.y, height);\n" +
-            "    gl_Position = uMvpMatrix * vec4(pos, 1.0);\n" +
+            "    vec3 pos = aPosition;\n" +
+            "    vec2 center = vec2(0.0, -1.2);\n" +
+            "    float d = distance(pos.xz, center);\n" +
+            "    float ripple = sin(d * 3.8 - uTime * 4.0) * (0.15 + uEnergy * 0.85);\n" +
+            "    float pulse = cos(pos.x * 2.2 + uTime * 2.0) * sin(pos.z * 1.8) * uEnergy * 0.4;\n" +
+            "    pos.y = (ripple + pulse) * max(0.2, (2.8 - d * 0.6));\n" +
+            "    gl_Position = uMVPMatrix * vec4(pos, 1.0);\n" +
+            "    float h = clamp((pos.y + 0.3) / 1.2, 0.0, 1.0);\n" +
+            "    vec3 cDeep = vec3(0.06, 0.16, 0.35);\n" +
+            "    vec3 cCyan = vec3(0.0, 0.9, 1.0);\n" +
+            "    vec3 cPink = vec3(1.0, 0.25, 0.5);\n" +
+            "    vec3 finalC = mix(cDeep, cCyan, h);\n" +
+            "    if (uEnergy > 0.6) {\n" +
+            "        finalC = mix(finalC, cPink, (uEnergy - 0.6) * 2.0 * h);\n" +
+            "    }\n" +
+            "    float alpha = clamp(1.0 - (d / 4.8), 0.2, 0.95);\n" +
+            "    vColor = vec4(finalC, alpha);\n" +
             "}\n";
 
-    // 片元着色器：水银金属反光质感与边缘羽化
-    private final String fragmentShaderCode =
+    // GLSL 片元着色器
+    private static final String FRAGMENT_SHADER =
             "precision mediump float;\n" +
-            "varying float vHeight;\n" +
-            "varying float vDist;\n" +
+            "varying vec4 vColor;\n" +
             "void main() {\n" +
-            "    float brightness = clamp(vHeight * 9.0 + 0.32, 0.06, 1.0);\n" +
-            "    vec3 mercury = vec3(0.92, 0.94, 0.98) * brightness;\n" +
-            "    float alpha = clamp((1.0 - vDist) * 1.5, 0.0, 1.0);\n" +
-            "    gl_FragColor = vec4(mercury * alpha, alpha * 0.85);\n" +
+            "    gl_FragColor = vColor;\n" +
             "}\n";
 
     public Visualizer3DView(Context context) {
@@ -82,101 +99,162 @@ public class Visualizer3DView extends GLSurfaceView implements GLSurfaceView.Ren
 
     private void init() {
         setEGLContextClientVersion(2);
+        setEGLConfigChooser(8, 8, 8, 8, 16, 0);
+        getHolder().setFormat(PixelFormat.TRANSLUCENT);
         setRenderer(this);
-        setRenderMode(RENDERMODE_CONTINUOUSLY);
-        initMesh();
+        setRenderMode(GLSurfaceView.RENDERMODE_CONTINUOUSLY);
+        buildGridGeometry();
     }
 
-    private void initMesh() {
-        float[] vertices = new float[VERTEX_COUNT * 3];
+    // 构建一次性静态网格点，运行时通过顶点着色器形变
+    private void buildGridGeometry() {
+        float stepX = (X_MAX - X_MIN) / GRID_COLS;
+        float stepZ = (Z_MAX - Z_MIN) / GRID_ROWS;
+
+        // 行线 + 列线段数量
+        int segments = (GRID_ROWS + 1) * GRID_COLS + (GRID_COLS + 1) * GRID_ROWS;
+        vertexCount = segments * 2;
+        float[] coords = new float[vertexCount * 3];
         int idx = 0;
-        for (int r = 0; r <= RINGS; r++) {
-            float radius = (float) r / (float) RINGS;
-            for (int s = 0; s < SECTORS; s++) {
-                float angle = (float) (s * 2.0 * Math.PI / SECTORS);
-                vertices[idx++] = (float) (radius * Math.cos(angle));
-                vertices[idx++] = (float) (radius * Math.sin(angle));
-                vertices[idx++] = 0f;
+
+        // 沿 X 轴横线
+        for (int r = 0; r <= GRID_ROWS; r++) {
+            float z = Z_MIN + r * stepZ;
+            for (int c = 0; c < GRID_COLS; c++) {
+                float x1 = X_MIN + c * stepX;
+                float x2 = X_MIN + (c + 1) * stepX;
+                coords[idx++] = x1; coords[idx++] = 0.0f; coords[idx++] = z;
+                coords[idx++] = x2; coords[idx++] = 0.0f; coords[idx++] = z;
             }
         }
-        ByteBuffer bb = ByteBuffer.allocateDirect(vertices.length * 4);
+
+        // 沿 Z 轴纵线
+        for (int c = 0; c <= GRID_COLS; c++) {
+            float x = X_MIN + c * stepX;
+            for (int r = 0; r < GRID_ROWS; r++) {
+                float z1 = Z_MIN + r * stepZ;
+                float z2 = Z_MIN + (r + 1) * stepZ;
+                coords[idx++] = x; coords[idx++] = 0.0f; coords[idx++] = z1;
+                coords[idx++] = x; coords[idx++] = 0.0f; coords[idx++] = z2;
+            }
+        }
+
+        ByteBuffer bb = ByteBuffer.allocateDirect(coords.length * 4);
         bb.order(ByteOrder.nativeOrder());
         vertexBuffer = bb.asFloatBuffer();
-        vertexBuffer.put(vertices);
+        vertexBuffer.put(coords);
         vertexBuffer.position(0);
     }
 
-    public void updateEnergy(float energy) {
-        this.targetEnergy = energy;
+    // ================= 外部交互与手势调节接口 =================
+
+    public void adjustPitch(float delta) {
+        float next = this.targetPitch + delta;
+        if (next < MIN_PITCH) next = MIN_PITCH;
+        if (next > MAX_PITCH) next = MAX_PITCH;
+        this.targetPitch = next;
+    }
+
+    public void setPitchAngle(float pitch) {
+        if (pitch < MIN_PITCH) pitch = MIN_PITCH;
+        if (pitch > MAX_PITCH) pitch = MAX_PITCH;
+        this.targetPitch = pitch;
+    }
+
+    public float getPitchAngle() {
+        return targetPitch;
+    }
+
+    public void resetPitchAngle() {
+        this.targetPitch = DEFAULT_PITCH;
     }
 
     public void setPlaying(boolean playing) {
         this.isPlaying = playing;
-        if (!playing) {
-            this.targetEnergy = 0f;
-        }
     }
+
+    public void updateEnergy(float energy) {
+        if (energy < 0.0f) energy = 0.0f;
+        if (energy > 1.0f) energy = 1.0f;
+        this.targetEnergy = energy;
+    }
+
+    // ================= GLSurfaceView.Renderer 接口实现 =================
 
     @Override
     public void onSurfaceCreated(GL10 gl, EGLConfig config) {
-        GLES20.glClearColor(0.039f, 0.043f, 0.055f, 1.0f);
+        GLES20.glClearColor(0.039f, 0.043f, 0.055f, 1.0f); // #0a0b0e 底色
         GLES20.glEnable(GLES20.GL_BLEND);
         GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA);
+        GLES20.glEnable(GLES20.GL_DEPTH_TEST);
+        GLES20.glDepthFunc(GLES20.GL_LEQUAL);
+        GLES20.glLineWidth(2.0f);
 
-        int vShader = loadShader(GLES20.GL_VERTEX_SHADER, vertexShaderCode);
-        int fShader = loadShader(GLES20.GL_FRAGMENT_SHADER, fragmentShaderCode);
-        programId = GLES20.glCreateProgram();
-        GLES20.glAttachShader(programId, vShader);
-        GLES20.glAttachShader(programId, fShader);
-        GLES20.glLinkProgram(programId);
+        int vShader = loadShader(GLES20.GL_VERTEX_SHADER, VERTEX_SHADER);
+        int fShader = loadShader(GLES20.GL_FRAGMENT_SHADER, FRAGMENT_SHADER);
+        program = GLES20.glCreateProgram();
+        GLES20.glAttachShader(program, vShader);
+        GLES20.glAttachShader(program, fShader);
+        GLES20.glLinkProgram(program);
 
-        aPosLoc = GLES20.glGetAttribLocation(programId, "aPosition");
-        uMvpMatrixLoc = GLES20.glGetUniformLocation(programId, "uMvpMatrix");
-        uTimeLoc = GLES20.glGetUniformLocation(programId, "uTime");
-        uEnergyLoc = GLES20.glGetUniformLocation(programId, "uEnergy");
+        uMVPMatrixLoc = GLES20.glGetUniformLocation(program, "uMVPMatrix");
+        uEnergyLoc = GLES20.glGetUniformLocation(program, "uEnergy");
+        uTimeLoc = GLES20.glGetUniformLocation(program, "uTime");
+        aPosLoc = GLES20.glGetAttribLocation(program, "aPosition");
     }
 
     @Override
     public void onSurfaceChanged(GL10 gl, int width, int height) {
         GLES20.glViewport(0, 0, width, height);
-        float ratio = (float) width / (float) height;
-        Matrix.frustumM(projectionMatrix, 0, -ratio * 0.5f, ratio * 0.5f, -0.5f, 0.5f, 1.0f, 10.0f);
-        Matrix.setLookAtM(viewMatrix, 0, 0f, -1.35f, 1.15f, 0f, 0.08f, 0f, 0f, 1f, 0f);
+        float ratio = (float) width / (height > 0 ? height : 1);
+        Matrix.perspectiveM(projMatrix, 0, 45.0f, ratio, 0.1f, 30.0f);
     }
 
     @Override
     public void onDrawFrame(GL10 gl) {
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT | GLES20.GL_DEPTH_BUFFER_BIT);
 
+        // 1. 平滑插值计算角度与能量
+        currentPitch += (targetPitch - currentPitch) * 0.15f;
         if (isPlaying) {
-            // 放慢时间步进，平缓推进
-            runningTime += 0.016f + smoothEnergy * 0.018f;
-            smoothEnergy = smoothEnergy * 0.78f + targetEnergy * 0.22f;
+            float lerpRate = targetEnergy > currentEnergy ? 0.35f : 0.12f;
+            currentEnergy += (targetEnergy - currentEnergy) * lerpRate;
         } else {
-            smoothEnergy = smoothEnergy * 0.85f;
-            if (smoothEnergy < 0.001f) {
-                smoothEnergy = 0f;
-            }
+            currentEnergy += (0.0f - currentEnergy) * 0.08f;
         }
 
-        GLES20.glUseProgram(programId);
+        // 2. 时间步进
+        long now = SystemClock.uptimeMillis();
+        if (lastTimeMs == 0) lastTimeMs = now;
+        float dt = (now - lastTimeMs) / 1000.0f;
+        lastTimeMs = now;
+        elapsedTime += dt * (isPlaying ? 1.5f : 0.35f);
+
+        // 3. 计算相机观察矩阵 (依据动态俯仰角定位视点)
+        float rad = (float) Math.toRadians(currentPitch);
+        float eyeY = (float) (Math.sin(rad) * 4.6);
+        float eyeZ = (float) (Math.cos(rad) * 4.6);
+        Matrix.setLookAtM(viewMatrix, 0,
+                0.0f, eyeY, eyeZ - 0.5f,
+                0.0f, 0.0f, -1.2f,
+                0.0f, 1.0f, 0.0f);
 
         Matrix.setIdentityM(modelMatrix, 0);
-        Matrix.multiplyMM(mvpMatrix, 0, viewMatrix, 0, modelMatrix, 0);
-        Matrix.multiplyMM(mvpMatrix, 0, projectionMatrix, 0, mvpMatrix, 0);
+        Matrix.multiplyMM(mvpMatrix, 0, projMatrix, 0, viewMatrix, 0);
 
-        GLES20.glUniformMatrix4fv(uMvpMatrixLoc, 1, false, mvpMatrix, 0);
-        GLES20.glUniform1f(uTimeLoc, runningTime);
-        GLES20.glUniform1f(uEnergyLoc, smoothEnergy);
+        // 4. 着色器渲染
+        if (program != 0 && vertexBuffer != null) {
+            GLES20.glUseProgram(program);
+            GLES20.glUniformMatrix4fv(uMVPMatrixLoc, 1, false, mvpMatrix, 0);
+            GLES20.glUniform1f(uEnergyLoc, currentEnergy);
+            GLES20.glUniform1f(uTimeLoc, elapsedTime);
 
-        GLES20.glEnableVertexAttribArray(aPosLoc);
-        GLES20.glVertexAttribPointer(aPosLoc, 3, GLES20.GL_FLOAT, false, 0, vertexBuffer);
+            GLES20.glEnableVertexAttribArray(aPosLoc);
+            GLES20.glVertexAttribPointer(aPosLoc, 3, GLES20.GL_FLOAT, false, 3 * 4, vertexBuffer);
 
-        for (int r = 0; r <= RINGS; r++) {
-            GLES20.glDrawArrays(GLES20.GL_LINE_LOOP, r * SECTORS, SECTORS);
+            GLES20.glDrawArrays(GLES20.GL_LINES, 0, vertexCount);
+            GLES20.glDisableVertexAttribArray(aPosLoc);
         }
-
-        GLES20.glDisableVertexAttribArray(aPosLoc);
     }
 
     private int loadShader(int type, String shaderCode) {
@@ -184,5 +262,16 @@ public class Visualizer3DView extends GLSurfaceView implements GLSurfaceView.Ren
         GLES20.glShaderSource(shader, shaderCode);
         GLES20.glCompileShader(shader);
         return shader;
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        lastTimeMs = 0;
+    }
+
+    @Override
+    public void onPause() {
+        super.onPause();
     }
 }
