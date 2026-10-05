@@ -64,6 +64,25 @@ public class MainActivity extends Activity {
     private static final String[] PLAZA_BITRATE_VALUES = new String[]{"follow", "128", "192", "320", "flac"};
     private static final String[] SEARCH_TYPES = new String[]{"单曲", "歌手", "专辑"};
 
+    // 3D 页面平板导航栏处理模式常量
+    public static final int NAV_MODE_LOW_PROFILE = 0; // 底栏: 灭灯
+    public static final int NAV_MODE_HIDE = 1;        // 底栏: 强隐
+    public static final int NAV_MODE_VISIBLE = 2;     // 底栏: 常驻
+    private int currentNavMode = NAV_MODE_LOW_PROFILE;
+    private Button btnVisualizerNavMode;
+    private Handler navBarHandler = new Handler();
+    private Runnable navBarHideRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (layoutVisualizerOverlay != null && layoutVisualizerOverlay.getVisibility() == View.VISIBLE) {
+                if (currentNavMode == NAV_MODE_HIDE) {
+                    getWindow().getDecorView().setSystemUiVisibility(
+                            View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LOW_PROFILE);
+                }
+            }
+        }
+    };
+
     // 侧边栏及主容器
     private Button btnNavSearch, btnNavPlaza, btnNavRanking, btnNavFav, btnNavLocal, btnNavSettings;
     private LinearLayout layoutPageSearch, layoutPagePlaza, layoutPageRanking, layoutPageFav, layoutPageLocal;
@@ -318,7 +337,7 @@ public class MainActivity extends Activity {
                 int duration = intent.getIntExtra("duration", 0);
                 int bufferPercent = intent.getIntExtra("bufferPercent", -1);
 
-                // 核心修复 1：严格控制缓冲提示，仅在 0%~99% 下载中显示，100% 或完成状态立即彻底隐藏
+                // 缓冲数值只在 0%~99% 下载阶段显示，下载完毕或落地缓存立即彻底隐藏
                 if (bufferPercent >= 0 && bufferPercent < 100) {
                     String bufStr = "缓冲 " + bufferPercent + "%";
                     if (tvBottomBuffer != null) {
@@ -376,7 +395,7 @@ public class MainActivity extends Activity {
                     updateFavButtonState(songId);
                 }
 
-                // 核心修复 2：严格门限阻断 18144s 异常时间值对 UI 进度条的拉扯抽搐
+                // 严格门限阻断 18144s 异常时间值对 UI 进度条的拉扯抽搐
                 boolean isDurationValid = (duration > 1000 && duration < 7200000);
                 if (!DlnaManager.isCasting() && !isUserSeeking && isPlaying && isDurationValid) {
                     if (position > duration) position = duration;
@@ -412,6 +431,7 @@ public class MainActivity extends Activity {
         lyricBaseFontSize = prefs.getInt("lyric_font_size", 15);
         isVinylDisplayMode = prefs.getBoolean("is_vinyl_display_mode", true);
         isPlazaGridMode = prefs.getBoolean("is_plaza_grid_mode", true);
+        currentNavMode = prefs.getInt("visualizer_nav_mode", NAV_MODE_LOW_PROFILE);
 
         if (imageMemoryCache == null) {
             int maxMemory = (int) (Runtime.getRuntime().maxMemory() / 1024);
@@ -658,6 +678,7 @@ public class MainActivity extends Activity {
         viewVisualizer3D = (Visualizer3DView) findViewById(R.id.view_visualizer_3d);
         ivVisualizerSilhouette = (ImageView) findViewById(R.id.iv_visualizer_silhouette);
         btnCloseVisualizer = (Button) findViewById(R.id.btn_close_visualizer);
+        btnVisualizerNavMode = (Button) findViewById(R.id.btn_visualizer_nav_mode);
         tvVisualizerCurrentLyric = (TextView) findViewById(R.id.tv_visualizer_current_lyric);
         tvVisualizerNextLyric = (TextView) findViewById(R.id.tv_visualizer_next_lyric);
         ivCapsuleCover = (ImageView) findViewById(R.id.iv_capsule_cover);
@@ -1914,6 +1935,34 @@ public class MainActivity extends Activity {
         });
     }
 
+    private void cycleNavBarMode() {
+        currentNavMode = (currentNavMode + 1) % 3;
+        prefs.edit().putInt("visualizer_nav_mode", currentNavMode).apply();
+        applyNavBarMode();
+    }
+
+    private void applyNavBarMode() {
+        if (layoutVisualizerOverlay == null || layoutVisualizerOverlay.getVisibility() != View.VISIBLE) {
+            return;
+        }
+        navBarHandler.removeCallbacks(navBarHideRunnable);
+        View decorView = getWindow().getDecorView();
+
+        if (currentNavMode == NAV_MODE_LOW_PROFILE) {
+            if (btnVisualizerNavMode != null) btnVisualizerNavMode.setText("底栏: 灭灯");
+            decorView.setSystemUiVisibility(View.SYSTEM_UI_FLAG_LOW_PROFILE);
+            Toast.makeText(this, "导航栏已灭灯 (微光防刺眼)", Toast.LENGTH_SHORT).show();
+        } else if (currentNavMode == NAV_MODE_HIDE) {
+            if (btnVisualizerNavMode != null) btnVisualizerNavMode.setText("底栏: 强隐");
+            decorView.setSystemUiVisibility(View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LOW_PROFILE);
+            Toast.makeText(this, "导航栏已强隐 (触屏呼出后自动复隐)", Toast.LENGTH_SHORT).show();
+        } else {
+            if (btnVisualizerNavMode != null) btnVisualizerNavMode.setText("底栏: 常驻");
+            decorView.setSystemUiVisibility(View.SYSTEM_UI_FLAG_VISIBLE);
+            Toast.makeText(this, "导航栏恢复常驻", Toast.LENGTH_SHORT).show();
+        }
+    }
+
     private void setupListeners() {
         View.OnClickListener exitListener = new View.OnClickListener() {
             @Override public void onClick(View v) { performAppExit(); }
@@ -2224,6 +2273,40 @@ public class MainActivity extends Activity {
             });
         }
 
+        // 3D 页面导航栏模式切换按钮监听
+        if (btnVisualizerNavMode != null) {
+            btnVisualizerNavMode.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    cycleNavBarMode();
+                }
+            });
+        }
+
+        // 强隐模式下，若用户点击屏幕唤出了导航栏，2.5秒后自动重新强隐
+        getWindow().getDecorView().setOnSystemUiVisibilityChangeListener(new View.OnSystemUiVisibilityChangeListener() {
+            @Override
+            public void onSystemUiVisibilityChange(int visibility) {
+                if (layoutVisualizerOverlay != null && layoutVisualizerOverlay.getVisibility() == View.VISIBLE) {
+                    if (currentNavMode == NAV_MODE_HIDE && (visibility & View.SYSTEM_UI_FLAG_HIDE_NAVIGATION) == 0) {
+                        navBarHandler.removeCallbacks(navBarHideRunnable);
+                        navBarHideRunnable = new Runnable() {
+                            @Override
+                            public void run() {
+                                if (layoutVisualizerOverlay != null && layoutVisualizerOverlay.getVisibility() == View.VISIBLE) {
+                                    if (currentNavMode == NAV_MODE_HIDE) {
+                                        getWindow().getDecorView().setSystemUiVisibility(
+                                                View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LOW_PROFILE);
+                                    }
+                                }
+                            }
+                        };
+                        navBarHandler.postDelayed(navBarHideRunnable, 2500);
+                    }
+                }
+            }
+        });
+
         // 胶囊控制栏播放/暂停切换（集成 DLNA 投播判断）
         if (btnCapsulePlayPause != null) {
             btnCapsulePlayPause.setOnClickListener(new View.OnClickListener() {
@@ -2380,6 +2463,10 @@ public class MainActivity extends Activity {
         if (layoutVisualizerQueuePanel != null) {
             layoutVisualizerQueuePanel.setVisibility(View.GONE);
         }
+
+        // 读取记忆的导航栏模式并应用到系统栏
+        currentNavMode = prefs.getInt("visualizer_nav_mode", NAV_MODE_LOW_PROFILE);
+        applyNavBarMode();
     }
 
     private void closeVisualizerOverlay() {
@@ -2392,6 +2479,10 @@ public class MainActivity extends Activity {
         if (layoutVisualizerQueuePanel != null) {
             layoutVisualizerQueuePanel.setVisibility(View.GONE);
         }
+
+        // 退出 3D 页面时恢复系统底栏常驻显示
+        navBarHandler.removeCallbacks(navBarHideRunnable);
+        getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_VISIBLE);
     }
 
     private void showArtistOrAlbumLongClickMenu(final DisplayEntry entry) {
@@ -3846,7 +3937,7 @@ public class MainActivity extends Activity {
         return Environment.getExternalStorageDirectory().getAbsolutePath() + "/Music";
     }
 
-    // 已彻底移除无用 preloadHandler 引用
+    // 彻底清除 preloadHandler，避免任何内存泄漏或找不到变量错误
     private void performAppExit() {
         new AlertDialog.Builder(this)
                 .setTitle("退出应用")
@@ -3856,6 +3947,7 @@ public class MainActivity extends Activity {
                     public void onClick(DialogInterface dialog, int which) {
                         DlnaManager.disconnect();
                         if (audioVisualizerHelper != null) audioVisualizerHelper.stop();
+                        navBarHandler.removeCallbacksAndMessages(null);
                         SongPreloadManager.getInstance().cancel();
                         stopService(new Intent(MainActivity.this, MusicService.class));
                         finish();
@@ -3916,6 +4008,7 @@ public class MainActivity extends Activity {
                 audioVisualizerHelper.setPlaying(isCurrentSongPlaying);
                 if (sessionId > 0) audioVisualizerHelper.start(sessionId);
             }
+            applyNavBarMode();
         }
     }
 
@@ -3926,12 +4019,13 @@ public class MainActivity extends Activity {
         if (audioVisualizerHelper != null) audioVisualizerHelper.stop();
     }
 
-    // 已彻底移除无用 preloadHandler 引用
+    // 彻底清除无用 preloadHandler 引用
     @Override
     protected void onDestroy() {
         super.onDestroy();
         try { unregisterReceiver(statusReceiver); } catch (Exception ignored) {}
         dlnaSyncHandler.removeCallbacksAndMessages(null);
+        navBarHandler.removeCallbacksAndMessages(null);
         SongPreloadManager.getInstance().cancel();
         if (audioVisualizerHelper != null) audioVisualizerHelper.stop();
     }
