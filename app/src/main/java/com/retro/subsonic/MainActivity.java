@@ -256,6 +256,7 @@ public class MainActivity extends Activity {
     private static LruCache<String, Bitmap> imageMemoryCache;
     private static final ExecutorService imageLoadExecutor = Executors.newFixedThreadPool(3);
 
+    private Handler visualizerDelayHandler = new Handler();
     private Handler dlnaSyncHandler = new Handler();
     private Runnable dlnaSyncRunnable = new Runnable() {
         @Override
@@ -488,7 +489,23 @@ public class MainActivity extends Activity {
         audioVisualizerHelper.setListener(new AudioVisualizerHelper.OnSpectrumDataListener() {
             @Override
             public void onSpectrumUpdate(float[] spectrum, final float overallEnergy) {
-                if (viewVisualizer3D != null && layoutVisualizerOverlay != null && layoutVisualizerOverlay.getVisibility() == View.VISIBLE) {
+                if (viewVisualizer3D == null || layoutVisualizerOverlay == null || layoutVisualizerOverlay.getVisibility() != View.VISIBLE) {
+                    return;
+                }
+
+                long delayMs = getCurrentEffectiveOffsetMs();
+                // 如果用户设置了正向时延（弥补外放/蓝牙滞后），动效对应延后派发
+                if (delayMs > 50 && delayMs <= 3000) {
+                    visualizerDelayHandler.postDelayed(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (viewVisualizer3D != null && layoutVisualizerOverlay != null && layoutVisualizerOverlay.getVisibility() == View.VISIBLE) {
+                                viewVisualizer3D.updateEnergy(overallEnergy);
+                            }
+                        }
+                    }, delayMs);
+                } else {
+                    // 本地无时延或负时延状态，保持实时硬件直通
                     viewVisualizer3D.updateEnergy(overallEnergy);
                 }
             }
@@ -2592,6 +2609,9 @@ public class MainActivity extends Activity {
         if (tvVisualizerClock != null) {
             clockHandler.removeCallbacks(clockRunnable);
         }
+        if (visualizerDelayHandler != null) {
+            visualizerDelayHandler.removeCallbacksAndMessages(null);
+        }
 
         // 退出 3D 页面时恢复系统底栏常驻显示
         navBarHandler.removeCallbacks(navBarHideRunnable);
@@ -3326,6 +3346,9 @@ public class MainActivity extends Activity {
         manualLyricOffsetMs = 0;
         updateLyricOffsetStatusView();
         rebuildActiveLyricsView();
+        if (visualizerDelayHandler != null) {
+            visualizerDelayHandler.removeCallbacksAndMessages(null);
+        }
     }
 
     private void updateLyricOffsetStatusView() {
@@ -4148,6 +4171,7 @@ public class MainActivity extends Activity {
         clockHandler.removeCallbacksAndMessages(null);
         SongPreloadManager.getInstance().cancel();
         if (audioVisualizerHelper != null) audioVisualizerHelper.stop();
+        if (visualizerDelayHandler != null) visualizerDelayHandler.removeCallbacksAndMessages(null);
     }
 
     private class PlazaGridAdapter extends BaseAdapter {
