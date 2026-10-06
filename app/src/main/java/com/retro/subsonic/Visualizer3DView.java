@@ -52,7 +52,7 @@ public class Visualizer3DView extends GLSurfaceView implements GLSurfaceView.Ren
     private long lastTimeMs = 0;
     private float elapsedTime = 0.0f;
 
-    // GLSL 顶点着色器 (动态波浪与赛博朋克渐变着色)
+    // GLSL 顶点着色器 (叠加瞬态动态波速，强化鼓点爆发力)
     private static final String VERTEX_SHADER =
             "uniform mat4 uMVPMatrix;\n" +
             "uniform float uEnergy;\n" +
@@ -63,7 +63,8 @@ public class Visualizer3DView extends GLSurfaceView implements GLSurfaceView.Ren
             "    vec3 pos = aPosition;\n" +
             "    vec2 center = vec2(0.0, -1.2);\n" +
             "    float d = distance(pos.xz, center);\n" +
-            "    float ripple = sin(d * 3.8 - uTime * 4.0) * (0.15 + uEnergy * 0.85);\n" +
+            "    float dynamicSpeed = uTime * 3.5 + uEnergy * 2.2;\n" +
+            "    float ripple = sin(d * 3.8 - dynamicSpeed) * (0.12 + uEnergy * 0.95);\n" +
             "    float pulse = cos(pos.x * 2.2 + uTime * 2.0) * sin(pos.z * 1.8) * uEnergy * 0.4;\n" +
             "    pos.y = (ripple + pulse) * max(0.2, (2.8 - d * 0.6));\n" +
             "    gl_Position = uMVPMatrix * vec4(pos, 1.0);\n" +
@@ -106,12 +107,10 @@ public class Visualizer3DView extends GLSurfaceView implements GLSurfaceView.Ren
         buildGridGeometry();
     }
 
-    // 构建一次性静态网格点，运行时通过顶点着色器形变
     private void buildGridGeometry() {
         float stepX = (X_MAX - X_MIN) / GRID_COLS;
         float stepZ = (Z_MAX - Z_MIN) / GRID_ROWS;
 
-        // 行线 + 列线段数量
         int segments = (GRID_ROWS + 1) * GRID_COLS + (GRID_COLS + 1) * GRID_ROWS;
         vertexCount = segments * 2;
         float[] coords = new float[vertexCount * 3];
@@ -183,7 +182,7 @@ public class Visualizer3DView extends GLSurfaceView implements GLSurfaceView.Ren
 
     @Override
     public void onSurfaceCreated(GL10 gl, EGLConfig config) {
-        GLES20.glClearColor(0.039f, 0.043f, 0.055f, 1.0f); // #0a0b0e 底色
+        GLES20.glClearColor(0.039f, 0.043f, 0.055f, 1.0f);
         GLES20.glEnable(GLES20.GL_BLEND);
         GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA);
         GLES20.glEnable(GLES20.GL_DEPTH_TEST);
@@ -214,11 +213,14 @@ public class Visualizer3DView extends GLSurfaceView implements GLSurfaceView.Ren
     public void onDrawFrame(GL10 gl) {
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT | GLES20.GL_DEPTH_BUFFER_BIT);
 
-        // 1. 平滑插值计算角度与能量
+        // 1. 视角插值与能量瞬态响应（Attack 0.82 爆发卡点，Decay 0.08 自然回落）
         currentPitch += (targetPitch - currentPitch) * 0.15f;
         if (isPlaying) {
-            float lerpRate = targetEnergy > currentEnergy ? 0.35f : 0.12f;
-            currentEnergy += (targetEnergy - currentEnergy) * lerpRate;
+            if (targetEnergy > currentEnergy) {
+                currentEnergy += (targetEnergy - currentEnergy) * 0.82f;
+            } else {
+                currentEnergy += (targetEnergy - currentEnergy) * 0.08f;
+            }
         } else {
             currentEnergy += (0.0f - currentEnergy) * 0.08f;
         }
@@ -230,7 +232,7 @@ public class Visualizer3DView extends GLSurfaceView implements GLSurfaceView.Ren
         lastTimeMs = now;
         elapsedTime += dt * (isPlaying ? 1.5f : 0.35f);
 
-        // 3. 计算相机观察矩阵 (依据动态俯仰角定位视点)
+        // 3. 计算相机观察矩阵 (依据动态俯仰角计算视点)
         float rad = (float) Math.toRadians(currentPitch);
         float eyeY = (float) (Math.sin(rad) * 4.6);
         float eyeZ = (float) (Math.cos(rad) * 4.6);
