@@ -493,9 +493,21 @@ public class MainActivity extends Activity {
                     return;
                 }
 
-                long delayMs = getCurrentEffectiveOffsetMs();
-                // 如果用户设置了正向时延（弥补外放/蓝牙滞后），动效对应延后派发
-                if (delayMs > 50 && delayMs <= 3000) {
+                // 获取当前补偿值
+                long rawOffset = getCurrentEffectiveOffsetMs();
+                long delayMs = 0;
+
+                if (DlnaManager.isCasting()) {
+                    // 投播模式下：远端音响天生滞后于平板本地解码，无论歌词设置+还是-，动效必须延后输出
+                    delayMs = Math.abs(rawOffset);
+                    // 若未手动微调但处于投播状态，兜底给一个基准延时 (如无微调则直通)
+                } else if (rawOffset > 50) {
+                    // 本地有线/扬声器模式下保持原正向延时逻辑
+                    delayMs = rawOffset;
+                }
+
+                // 时延安全门限控制在 50ms ~ 3000ms
+                if (delayMs >= 50 && delayMs <= 3000) {
                     visualizerDelayHandler.postDelayed(new Runnable() {
                         @Override
                         public void run() {
@@ -505,7 +517,7 @@ public class MainActivity extends Activity {
                         }
                     }, delayMs);
                 } else {
-                    // 本地无时延或负时延状态，保持实时硬件直通
+                    // 本地零时延直通渲染
                     viewVisualizer3D.updateEnergy(overallEnergy);
                 }
             }
