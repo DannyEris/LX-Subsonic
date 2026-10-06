@@ -1670,8 +1670,8 @@
             android:layout_height="wrap_content"
             android:layout_gravity="top|left"
             android:orientation="vertical"
-            android:layout_marginTop="110dp"
-            android:paddingLeft="110dp"
+            android:layout_marginTop="130dp"
+            android:paddingLeft="130dp"
             android:paddingRight="60dp">
             <!-- 当前句歌词 (亮白发光聚焦) -->
             <TextView
@@ -1680,7 +1680,7 @@
                 android:layout_height="wrap_content"
                 android:text="等待播放..."
                 android:textColor="#FFFFFF"
-                android:textSize="25sp"
+                android:textSize="35sp"
                 android:textStyle="bold"
                 android:shadowColor="#80FFFFFF"
                 android:shadowDx="0"
@@ -1693,7 +1693,7 @@
                 android:layout_height="wrap_content"
                 android:text=""
                 android:textColor="#5A606E"
-                android:textSize="16sp"
+                android:textSize="22sp"
                 android:layout_marginTop="8dp" />
         </LinearLayout>
 
