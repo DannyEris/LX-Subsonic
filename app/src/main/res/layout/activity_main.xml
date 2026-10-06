@@ -1685,7 +1685,7 @@
                 android:shadowColor="#80FFFFFF"
                 android:shadowDx="0"
                 android:shadowDy="0"
-                android:shadowRadius="10" />
+                android:shadowRadius="14" />
             <!-- 下一句歌词 (暗灰微透预告) -->
             <TextView
                 android:id="@+id/tv_visualizer_next_lyric"
